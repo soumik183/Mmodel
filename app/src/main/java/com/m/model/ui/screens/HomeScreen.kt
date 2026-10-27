@@ -142,6 +142,15 @@ fun HomeScreen(
             SectionHeader(
                 title = "Your device",
                 subtitle = "Live specifications from this phone",
+                trailing = {
+                    IconButton(onClick = vm::refreshDevice) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Recheck device",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
             )
         }
         item { DeviceCard(device) }
@@ -410,6 +419,10 @@ private fun DeviceCard(device: DeviceSpecs) {
             InfoRow(label = "Chipset", value = device.soc)
             InfoRow(label = "System", value = device.androidVersion)
             InfoRow(label = "ABI", value = device.abi)
+            InfoRow(
+                label = "Local chat",
+                value = if (device.canRunLocalChat) "Supported · llama.cpp" else "Unavailable · needs arm64",
+            )
         }
     }
 }
@@ -438,7 +451,7 @@ private fun HowItWorksCard(device: DeviceSpecs) {
                 Text(text = "How fit is estimated", style = MaterialTheme.typography.titleMedium)
             }
             Text(
-                text = "Mmodel reads the smallest GGUF file in a repo and compares it with a safe RAM budget of ${formatBytes(device.inferenceBudgetBytes)}. Android memory use, context length and the runtime you choose can change the result.",
+                text = "Mmodel reads the actual GGUF sizes published by a repo, sums multi-shard quants, and compares the smallest option with a safe RAM budget of ${formatBytes(device.inferenceBudgetBytes)}. Downloaded models can then run locally through llama.cpp.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
             )

@@ -17,12 +17,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
@@ -31,27 +41,37 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.m.model.data.DeviceSpecs
+import com.m.model.data.DownloadRecord
+import com.m.model.data.DownloadStatus
 import com.m.model.data.Fit
+import com.m.model.data.GgufVariant
 import com.m.model.data.ModelCard
+import com.m.model.data.ModelFit
 import com.m.model.ui.MainViewModel
 import com.m.model.ui.components.FitBadge
 import com.m.model.ui.components.InfoRow
 import com.m.model.ui.components.LetterAvatar
 import com.m.model.ui.components.MessageCard
+import com.m.model.ui.components.SectionHeader
 import com.m.model.ui.components.fitColors
 import com.m.model.ui.components.fitIcon
 import com.m.model.ui.formatBytes
@@ -65,12 +85,15 @@ fun DetailScreen(
     vm: MainViewModel,
     modelId: String,
     onBack: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onOpenChat: (String) -> Unit,
 ) {
     LaunchedEffect(modelId) { vm.openModel(modelId) }
 
     val state = vm.detail
     val card = state.card
     val context = LocalContext.current
+    val downloads by vm.downloads.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -152,8 +175,17 @@ fun DetailScreen(
                 DetailContent(
                     card = card,
                     device = vm.device,
+                    downloads = downloads,
+                    downloadNotice = vm.downloadNotice,
                     modifier = Modifier.padding(padding),
                     onOpen = { openOnHuggingFace(context, card.id) },
+                    onDownload = { variant -> vm.startDownload(card, variant) },
+                    onPause = vm::pauseDownload,
+                    onResume = vm::resumeDownload,
+                    onClearNotice = vm::clearDownloadNotice,
+                    onOpenChat = onOpenChat,
+                    onOpenDownloads = onOpenDownloads,
+                    onRefreshDevice = vm::refreshDevice,
                 )
             }
         }
@@ -164,8 +196,17 @@ fun DetailScreen(
 private fun DetailContent(
     card: ModelCard,
     device: DeviceSpecs,
+    downloads: List<DownloadRecord>,
+    downloadNotice: String?,
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
+    onDownload: (GgufVariant) -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onClearNotice: () -> Unit,
+    onOpenChat: (String) -> Unit,
+    onOpenDownloads: () -> Unit,
+    onRefreshDevice: () -> Unit,
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -226,8 +267,69 @@ private fun DetailContent(
         }
 
         item { FitCard(card = card, device = device) }
+
+        item {
+            SectionHeader(
+                title = "Download a quantization",
+                subtitle = if (card.variants.isEmpty()) {
+                    "No GGUF files in this repo"
+                } else {
+                    "Real file sizes from Hugging Face"
+                },
+                trailing = {
+                    if (card.variants.isNotEmpty()) {
+                        TextButton(onClick = onOpenDownloads) {
+                            Text("Downloads")
+                        }
+                    }
+                },
+            )
+        }
+
+        downloadNotice?.let { notice ->
+            item {
+                DownloadNoticeCard(text = notice, onDismiss = onClearNotice)
+            }
+        }
+
+        if (card.variants.isEmpty()) {
+            item {
+                MessageCard(
+                    icon = Icons.Rounded.Download,
+                    title = "No downloadable GGUF found",
+                    message = "This repo does not publish GGUF weight files with sizes. Try a model tagged GGUF, or open it on Hugging Face to inspect its files.",
+                    actionLabel = "Open Hugging Face",
+                    onAction = onOpen,
+                )
+            }
+        } else {
+            items(card.variants, key = { it.key }) { variant ->
+                val record = downloads.firstOrNull {
+                    it.id == DownloadRecord.idFor(card.id, variant)
+                }
+                VariantCard(
+                    variant = variant,
+                    record = record,
+                    device = device,
+                    onDownload = { onDownload(variant) },
+                    onPause = { record?.let { onPause(it.id) } },
+                    onResume = { record?.let { onResume(it.id) } },
+                    onOpenChat = onOpenChat,
+                    onOpenDownloads = onOpenDownloads,
+                )
+            }
+
+            item {
+                Text(
+                    text = "One download runs at a time. If a connection drops, Resume continues from the partial file. Multi-shard GGUFs are saved together but local chat currently loads single-file GGUFs only.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         item { ModelDetailsCard(card = card) }
-        item { DeviceCheckCard(device = device) }
+        item { DeviceCheckCard(device = device, onRefresh = onRefreshDevice) }
 
         item {
             Button(
@@ -249,7 +351,7 @@ private fun DetailContent(
 
         item {
             Text(
-                text = "Fit compares the smallest published GGUF file with a RAM budget of 75% of total memory, minus 1.5 GB for Android. Quantization, context size, background apps and your runtime can change real results.",
+                text = "Fit uses actual Hugging Face file sizes and this phone's live memory and storage. RAM is estimated at 1.15× the quant size plus 600 MB overhead, compared with a safe budget of 75% of total RAM minus 1.5 GB. Context size, runtime and background apps can change the result.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -258,8 +360,267 @@ private fun DetailContent(
 }
 
 @Composable
+private fun VariantCard(
+    variant: GgufVariant,
+    record: DownloadRecord?,
+    device: DeviceSpecs,
+    onDownload: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onOpenChat: (String) -> Unit,
+    onOpenDownloads: () -> Unit,
+) {
+    val complete = record?.isComplete == true
+    val shownFit = if (complete && record != null) {
+        ModelFit.ramFit(record.totalBytes, device).fit
+    } else {
+        variant.fit.fit
+    }
+    val canChat = complete &&
+        record != null &&
+        record.files.size == 1 &&
+        device.canRunLocalChat &&
+        shownFit != Fit.WONT_RUN
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = variant.quant,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        if (variant.sharded) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                            ) {
+                                Text(
+                                    text = "${variant.fileCount} files",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = buildString {
+                            append(formatBytes(variant.bytes))
+                            append(" · ")
+                            append(variant.files.firstOrNull()?.name ?: "GGUF")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                FitBadge(fit = shownFit)
+            }
+
+            when {
+                complete && record != null -> {
+                    if (canChat) {
+                        Button(onClick = { onOpenChat(record.id) }) {
+                            Icon(
+                                imageVector = Icons.Rounded.ChatBubble,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Chat with this quant")
+                        }
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = "Downloaded",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                            TextButton(onClick = onOpenDownloads) {
+                                Text("Open in Downloads")
+                            }
+                        }
+                    }
+                }
+
+                record != null && record.status == DownloadStatus.DOWNLOADING -> {
+                    val progress = if (record.totalBytes > 0L) {
+                        (record.doneBytes.toFloat() / record.totalBytes).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(CircleShape),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "${(progress * 100).toInt()}% · ${formatBytes(record.doneBytes)} of ${formatBytes(record.totalBytes)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(onClick = onPause) {
+                            Icon(
+                                imageVector = Icons.Rounded.Pause,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Pause")
+                        }
+                    }
+                }
+
+                record != null -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(onClick = onResume) {
+                            Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Resume")
+                        }
+                        TextButton(onClick = onOpenDownloads) {
+                            Text("Open in Downloads")
+                        }
+                    }
+                }
+
+                else -> {
+                    Button(
+                        onClick = onDownload,
+                        enabled = !variant.fit.storageBlocked,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (variant.fit.storageBlocked) {
+                                "Not enough storage"
+                            } else {
+                                "Download ${formatBytes(variant.bytes)}"
+                            },
+                        )
+                    }
+                }
+            }
+
+            record?.let { current ->
+                if (current.status != DownloadStatus.DONE || current.error != null) {
+                    current.error?.takeIf { it.isNotBlank() }?.let { error ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ErrorOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                            Text(
+                                text = error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = current.dirPath,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            if (!complete && variant.fit.storageBlocked) {
+                Text(
+                    text = "This quant does not fit in the free storage reported right now. Free up space and tap Recheck.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadNoticeCard(text: String, onDismiss: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    }
+}
+
+@Composable
 private fun FitCard(card: ModelCard, device: DeviceSpecs) {
     val (background, content) = fitColors(card.fit.fit)
+    val bestVariant = card.bestVariant
+    val downloadBytes = card.downloadBytes
     val title = when {
         card.fit.storageBlocked -> "Not enough storage"
         card.fit.fit == Fit.WORKS -> "Works on this phone"
@@ -269,10 +630,10 @@ private fun FitCard(card: ModelCard, device: DeviceSpecs) {
     }
     val message = when {
         card.fit.storageBlocked ->
-            "The download needs ${formatBytes(card.downloadBytes)}, but only ${formatBytes(device.freeStorageBytes)} is free."
+            "The best quant needs ${formatBytes(card.downloadBytes)}, but only ${formatBytes(device.freeStorageBytes)} is free."
 
         card.fit.fit == Fit.WORKS ->
-            "The smallest quant sits inside your safe RAM budget."
+            "The best quant sits inside your safe RAM budget."
 
         card.fit.fit == Fit.SLOW ->
             "It may load, but expect low speed and memory pressure."
@@ -346,6 +707,46 @@ private fun FitCard(card: ModelCard, device: DeviceSpecs) {
                 }
             }
 
+            if (bestVariant != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "Best quant · ${bestVariant.quant}",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Text(
+                        text = formatBytes(downloadBytes),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+
+            if (downloadBytes != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "Free storage now",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Text(
+                        text = formatBytes(device.freeStorageBytes),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                val after = device.freeStorageBytes - downloadBytes
+                if (after > 0L) {
+                    Text(
+                        text = "About ${formatBytes(after)} left after this download.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = content.copy(alpha = 0.8f),
+                    )
+                }
+            }
+
             if (card.fit.storageBlocked) {
                 Text(
                     text = "Free up space or choose a smaller quantization.",
@@ -358,6 +759,7 @@ private fun FitCard(card: ModelCard, device: DeviceSpecs) {
 
 @Composable
 private fun ModelDetailsCard(card: ModelCard) {
+    val bestVariant = card.bestVariant
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -369,8 +771,12 @@ private fun ModelDetailsCard(card: ModelCard) {
             Text(text = "Model details", style = MaterialTheme.typography.titleMedium)
             InfoRow(label = "Parameters", value = formatParams(card.parameters))
             InfoRow(
-                label = if (card.ggufVariants > 0) "Smallest GGUF" else "Weight files",
-                value = formatBytes(card.downloadBytes),
+                label = if (card.ggufVariants > 0) "Best-fit GGUF" else "Weight files",
+                value = if (bestVariant != null) {
+                    "${formatBytes(card.downloadBytes)} · ${bestVariant.quant}"
+                } else {
+                    formatBytes(card.downloadBytes)
+                },
             )
             if (card.ggufVariants > 0) {
                 InfoRow(label = "GGUF options", value = card.ggufVariants.toString())
@@ -392,7 +798,7 @@ private fun ModelDetailsCard(card: ModelCard) {
 }
 
 @Composable
-private fun DeviceCheckCard(device: DeviceSpecs) {
+private fun DeviceCheckCard(device: DeviceSpecs, onRefresh: () -> Unit) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -401,7 +807,25 @@ private fun DeviceCheckCard(device: DeviceSpecs) {
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(text = "Your phone", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Your phone",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Recheck")
+                }
+            }
             InfoRow("Fit budget", formatBytes(device.inferenceBudgetBytes))
             InfoRow("Total RAM", formatBytes(device.totalRamBytes))
             InfoRow("Free RAM", formatBytes(device.availableRamBytes))
@@ -410,6 +834,10 @@ private fun DeviceCheckCard(device: DeviceSpecs) {
             InfoRow("CPU", "${device.cpuCores} cores · ${device.abi}")
             InfoRow("Graphics", "GLES ${device.glEsVersion}")
             InfoRow("System", device.androidVersion)
+            InfoRow(
+                "Local chat",
+                if (device.canRunLocalChat) "Supported · llama.cpp" else "Unavailable · needs arm64",
+            )
         }
     }
 }

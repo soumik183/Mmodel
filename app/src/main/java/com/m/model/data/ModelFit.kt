@@ -9,16 +9,35 @@ data class FitResult(
     val storageBlocked: Boolean = false,
 )
 
+data class GgufFile(
+    val name: String,
+    val bytes: Long,
+)
+
+data class GgufVariant(
+    val key: String,
+    val quant: String,
+    val files: List<GgufFile>,
+    val bytes: Long,
+    val fit: FitResult,
+    val sharded: Boolean = false,
+) {
+    val firstFile: String get() = files.firstOrNull()?.name.orEmpty()
+    val fileCount: Int get() = files.size
+}
+
 data class ModelCard(
     val model: HfModel,
     val downloadBytes: Long?,
     val parameters: Long?,
     val ggufVariants: Int,
     val fit: FitResult,
+    val variants: List<GgufVariant> = emptyList(),
 ) {
     val id: String get() = model.id
     val name: String get() = model.id.substringAfterLast('/').ifBlank { model.id }
     val author: String get() = model.author ?: model.id.substringBefore('/', "")
+    val bestVariant: GgufVariant? get() = variants.minByOrNull { it.bytes }
 }
 
 object ModelFit {
@@ -26,64 +45,103 @@ object ModelFit {
     private const val RESERVED_STORAGE = 300L * MB
 
     private val shardPattern =
-        Regex("""^(.*)-\d{5}-of-\d{5}\.gguf$""", RegexOption.IGNORE_CASE)
+        Regex("""^(.*)-(\d{5})-of-(\d{5})\.gguf$""", RegexOption.IGNORE_CASE)
+
+    private val quantPattern = Regex(
+        """(?:^|[._-])((?:I?Q\d(?:_[A-Z0-9]+)*|BF16|F16|F32|FP16|FP32))(?=$|[._-])""",
+        RegexOption.IGNORE_CASE,
+    )
 
     fun analyze(model: HfModel, device: DeviceSpecs): ModelCard {
-        val ggufSizes = ggufGroups(model)
-        val isGguf = ggufSizes.isNotEmpty()
-        val downloadBytes = if (isGguf) ggufSizes.minOrNull() else otherWeightBytes(model)
+        val variants = ggufVariants(model, device)
+        val isGguf = variants.isNotEmpty()
+        val best = variants.minByOrNull { it.bytes }
+        val downloadBytes = best?.bytes ?: otherWeightBytes(model)
 
         val parameters = model.gguf?.total?.takeIf { it > 0 }
             ?: model.safetensors?.total?.takeIf { it > 0 }
             ?: model.safetensors?.parameters?.values?.maxOrNull()?.takeIf { it > 0 }
 
-        val needsRam = downloadBytes?.let { bytes ->
-            val factor = if (isGguf) 1.15 else 1.2
-            val overhead = if (isGguf) 600L * MB else 900L * MB
-            (bytes * factor).toLong() + overhead
-        }
-
-        val budget = device.inferenceBudgetBytes
-        val storageBlocked = downloadBytes != null &&
-            downloadBytes + RESERVED_STORAGE > device.freeStorageBytes
-
-        val fit = when {
-            downloadBytes == null || needsRam == null -> Fit.UNKNOWN
-            storageBlocked -> Fit.WONT_RUN
-            budget <= 0L -> Fit.WONT_RUN
-            else -> when (needsRam.toFloat() / budget) {
-                in 0f..0.65f -> Fit.WORKS
-                in 0f..1f -> Fit.SLOW
-                else -> Fit.WONT_RUN
-            }
-        }
-
-        val ratio = if (needsRam != null && budget > 0L) {
-            needsRam.toFloat() / budget
-        } else {
-            0f
-        }
+        val fit = best?.fit ?: fitFor(downloadBytes, device, isGguf = false)
 
         return ModelCard(
             model = model,
             downloadBytes = downloadBytes,
             parameters = parameters,
-            ggufVariants = ggufSizes.size,
-            fit = FitResult(
-                fit = fit,
-                estimatedRamBytes = needsRam,
-                ratio = ratio,
-                storageBlocked = storageBlocked,
-            ),
+            ggufVariants = variants.size,
+            fit = fit,
+            variants = variants,
         )
     }
 
     /**
-     * One entry per downloadable quantization. Sharded GGUF files are summed into
-     * one entry so we never mistake one shard for the whole model.
+     * Fit for a whole variant, including the space the download needs.
      */
-    private fun ggufGroups(model: HfModel): List<Long> {
-        val groups = linkedMapOf<String, Long>()
+    fun fitFor(fileBytes: Long?, device: DeviceSpecs, isGguf: Boolean = true): FitResult {
+        if (fileBytes == null || fileBytes <= 0L) {
+            return FitResult(Fit.UNKNOWN, null, 0f)
+        }
+
+        val needsRam = estimateRamBytes(fileBytes, isGguf)
+        val budget = device.inferenceBudgetBytes
+        val storageBlocked = fileBytes + RESERVED_STORAGE > device.freeStorageBytes
+        val ratio = if (budget > 0L) needsRam.toFloat() / budget else 0f
+
+        val fit = when {
+            storageBlocked -> Fit.WONT_RUN
+            budget <= 0L -> Fit.WONT_RUN
+            ratio <= 0.65f -> Fit.WORKS
+            ratio <= 1f -> Fit.SLOW
+            else -> Fit.WONT_RUN
+        }
+
+        return FitResult(fit, needsRam, ratio, storageBlocked)
+    }
+
+    /**
+     * Memory-only fit, used after a model has already been downloaded.
+     */
+    fun ramFit(fileBytes: Long?, device: DeviceSpecs): FitResult {
+        if (fileBytes == null || fileBytes <= 0L) {
+            return FitResult(Fit.UNKNOWN, null, 0f)
+        }
+
+        val needsRam = estimateRamBytes(fileBytes, isGguf = true)
+        val budget = device.inferenceBudgetBytes
+        val ratio = if (budget > 0L) needsRam.toFloat() / budget else 0f
+        val fit = when {
+            budget <= 0L -> Fit.WONT_RUN
+            ratio <= 0.65f -> Fit.WORKS
+            ratio <= 1f -> Fit.SLOW
+            else -> Fit.WONT_RUN
+        }
+        return FitResult(fit, needsRam, ratio)
+    }
+
+    fun estimateRamBytes(fileBytes: Long, isGguf: Boolean = true): Long {
+        val factor = if (isGguf) 1.15 else 1.2
+        val overhead = if (isGguf) 600L * MB else 900L * MB
+        return (fileBytes * factor).toLong() + overhead
+    }
+
+    fun quantLabel(fileName: String): String {
+        val base = fileName
+            .substringAfterLast('/')
+            .removeSuffix(".gguf")
+            .removeSuffix(".GGUF")
+            .replace(shardPattern, "$1")
+        val match = quantPattern.find(base) ?: return "GGUF"
+        return match.groupValues[1].uppercase()
+    }
+
+    /**
+     * One entry per downloadable quantization. Sharded GGUF files are summed
+     * into one entry so we never mistake one shard for the whole model.
+     */
+    private fun ggufVariants(model: HfModel, device: DeviceSpecs): List<GgufVariant> {
+        val groups = linkedMapOf<String, MutableList<HfSibling>>()
+        val shardBases = mutableMapOf<String, String>()
+
         model.siblings.forEach { sibling ->
             val size = sibling.size?.takeIf { it > 0 } ?: return@forEach
             val name = sibling.rfilename
@@ -100,13 +158,29 @@ object ModelFit {
 
             val shard = shardPattern.matchEntire(name)
             val key = if (shard != null) {
-                "shard:${shard.groupValues[1].lowercase()}"
+                val base = shard.groupValues[1]
+                shardBases[base.lowercase()] = base
+                "shard:${base.lowercase()}"
             } else {
                 "file:${name.lowercase()}"
             }
-            groups[key] = (groups[key] ?: 0L) + size
+            groups.getOrPut(key) { mutableListOf() }.add(sibling)
         }
-        return groups.values.toList()
+
+        return groups.map { (key, siblings) ->
+            val sorted = siblings.sortedBy { it.rfilename.lowercase() }
+            val files = sorted.map { GgufFile(it.rfilename, it.size ?: 0L) }
+            val bytes = files.sumOf { it.bytes }
+            val baseName = shardBases[key.removePrefix("shard:")] ?: files.first().name
+            GgufVariant(
+                key = key,
+                quant = quantLabel(baseName),
+                files = files,
+                bytes = bytes,
+                fit = fitFor(bytes, device),
+                sharded = files.size > 1 || key.startsWith("shard:"),
+            )
+        }.sortedBy { it.bytes }
     }
 
     private fun otherWeightBytes(model: HfModel): Long? {

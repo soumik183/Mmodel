@@ -16,6 +16,14 @@ data class HfModel(
     val siblings: List<HfSibling> = emptyList(),
     val safetensors: HfSafetensors? = null,
     val gguf: HfGguf? = null,
+    val config: HfConfig? = null,
+)
+
+@Serializable
+data class HfConfig(
+    val architectures: List<String> = emptyList(),
+    @SerialName("model_type") val modelType: String? = null,
+    @SerialName("max_position_embeddings") val maxPositionEmbeddings: Long? = null,
 )
 
 @Serializable
@@ -35,6 +43,7 @@ data class HfGguf(
     val total: Long? = null,
     val architecture: String? = null,
     @SerialName("context_length") val contextLength: Long? = null,
+    @SerialName("chat_template") val chatTemplate: String? = null,
 )
 
 enum class ModelSort(val label: String, val apiValue: String) {

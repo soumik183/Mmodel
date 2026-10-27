@@ -6,21 +6,35 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.m.model.data.ChatPrompt
+import com.m.model.data.ChatTurn
 import com.m.model.data.DeviceSpecs
+import com.m.model.data.DownloadRecord
+import com.m.model.data.DownloadStatus
+import com.m.model.data.DownloadStore
 import com.m.model.data.Fit
+import com.m.model.data.GgufVariant
 import com.m.model.data.HfApi
 import com.m.model.data.HfHttpException
 import com.m.model.data.HfModel
+import com.m.model.data.LlamaEngine
 import com.m.model.data.ModelCard
 import com.m.model.data.ModelFit
 import com.m.model.data.ModelSort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.Locale
 import kotlin.math.log10
 
 data class BrowseState(
@@ -39,8 +53,33 @@ data class DetailState(
     val error: String? = null,
 )
 
+enum class ChatRole { USER, ASSISTANT }
+
+data class ChatMessage(
+    val id: Long,
+    val role: ChatRole,
+    val text: String,
+    val streaming: Boolean = false,
+    val meta: String? = null,
+)
+
+data class ChatState(
+    val recordId: String? = null,
+    val modelName: String = "",
+    val messages: List<ChatMessage> = emptyList(),
+    val loadingModel: Boolean = false,
+    val ready: Boolean = false,
+    val generating: Boolean = false,
+    val stopping: Boolean = false,
+    val contextLength: Int = 0,
+    val threads: Int = 0,
+    val error: String? = null,
+    val status: String? = null,
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    val device: DeviceSpecs = DeviceSpecs.read(application)
+    var device by mutableStateOf(DeviceSpecs.read(application))
+        private set
 
     private val api = HfApi()
     private val cache = mutableMapOf<String, ModelCard>()
@@ -61,9 +100,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var detail by mutableStateOf(DetailState())
         private set
 
+    private val downloadsStore = DownloadStore(application)
+    val downloads: StateFlow<List<DownloadRecord>> = downloadsStore.records
+    val downloadsRootPath: String get() = downloadsStore.modelsRoot.absolutePath
+
+    var downloadNotice by mutableStateOf<String?>(null)
+        private set
+
+    private val engine = LlamaEngine()
+    private val chatPreferences = application.getSharedPreferences("chat", 0)
+    private val _chat = MutableStateFlow(ChatState())
+    val chat: StateFlow<ChatState> = _chat.asStateFlow()
+
+    private var nextMessageId = 0L
+    @Volatile
+    private var generationId = 0L
+    @Volatile
+    private var chatLoadEpoch = 0L
+
     init {
         loadRecommendations()
         scheduleSearch(0)
+
+        val lastId = chatPreferences.getString(KEY_LAST_MODEL, null)
+        if (!lastId.isNullOrBlank()) {
+            downloadsStore.records.value
+                .firstOrNull { it.id == lastId && it.isComplete }
+                ?.let { record ->
+                    _chat.value = ChatState(
+                        recordId = record.id,
+                        modelName = record.displayName,
+                    )
+                }
+        }
+
+        viewModelScope.launch {
+            downloadsStore.records.collect { records ->
+                val selectedId = _chat.value.recordId ?: return@collect
+                val selected = records.firstOrNull { it.id == selectedId }
+                if (selected == null || !selected.isComplete) {
+                    invalidateChat("The downloaded model is no longer available.")
+                } else if (_chat.value.modelName != selected.displayName) {
+                    _chat.update { it.copy(modelName = selected.displayName) }
+                }
+            }
+        }
     }
 
     fun onQueryChange(value: String) {
@@ -93,6 +174,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshRecommendations() {
         loadRecommendations()
+    }
+
+    fun refreshDevice() {
+        val updated = DeviceSpecs.read(getApplication())
+        device = updated
+
+        val refreshed = cache.mapValues { (_, card) -> ModelFit.analyze(card.model, updated) }
+        cache.clear()
+        cache.putAll(refreshed)
+
+        browse = browse.copy(
+            items = browse.items.map { refreshed[it.id] ?: ModelFit.analyze(it.model, updated) },
+        )
+        recommendations = recommendations
+            .map { refreshed[it.id] ?: ModelFit.analyze(it.model, updated) }
+            .filter { it.fit.fit == Fit.WORKS || it.fit.fit == Fit.SLOW }
+            .sortedByDescending { score(it) }
+            .take(12)
+        detail = detail.copy(
+            card = detail.card?.let { refreshed[it.id] ?: ModelFit.analyze(it.model, updated) },
+        )
     }
 
     private fun scheduleSearch(delayMs: Long) {
@@ -197,6 +299,427 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         detail = DetailState()
     }
 
+    fun downloadRecord(modelId: String, variant: GgufVariant): DownloadRecord? =
+        downloadsStore.records.value.firstOrNull {
+            it.id == DownloadRecord.idFor(modelId, variant)
+        }
+
+    fun startDownload(card: ModelCard, variant: GgufVariant) {
+        val existing = downloadRecord(card.id, variant)
+        when {
+            existing?.status == DownloadStatus.DONE -> {
+                downloadNotice = "Already downloaded. Open Downloads to chat with it."
+                return
+            }
+
+            existing?.status == DownloadStatus.DOWNLOADING -> {
+                downloadNotice = "This model is already downloading."
+                return
+            }
+
+            variant.fit.storageBlocked -> {
+                downloadNotice = "Not enough free storage for this download. Free up space first."
+                return
+            }
+        }
+
+        val error = if (existing == null) {
+            downloadsStore.startNew(
+                DownloadRecord.create(card, variant, downloadsStore.modelsRoot),
+                viewModelScope,
+            )
+        } else {
+            downloadsStore.start(existing.id, viewModelScope)
+        }
+        downloadNotice = error ?: if (existing == null) {
+            "Download started. Track it in Downloads."
+        } else {
+            "Continuing download."
+        }
+    }
+
+    fun pauseDownload(recordId: String) {
+        downloadsStore.pause(recordId)
+        downloadNotice = "Download paused. You can resume it later."
+    }
+
+    fun resumeDownload(recordId: String) {
+        val error = downloadsStore.start(recordId, viewModelScope)
+        downloadNotice = error ?: "Continuing download."
+    }
+
+    fun deleteDownload(recordId: String) {
+        downloadsStore.delete(recordId, viewModelScope)
+        downloadNotice = "Download removed from this phone."
+    }
+
+    fun clearDownloadNotice() {
+        downloadNotice = null
+    }
+
+    fun downloadFreeBytes(): Long = downloadsStore.freeBytes()
+
+    fun openChatFor(recordId: String) {
+        val record = downloadsStore.records.value.firstOrNull { it.id == recordId }
+        if (record == null || !record.isComplete) {
+            downloadNotice = "Download this model before starting a chat."
+            return
+        }
+        selectChatRecord(recordId, autoLoad = true)
+    }
+
+    fun selectChatRecord(recordId: String, autoLoad: Boolean = true) {
+        val record = downloadsStore.records.value.firstOrNull { it.id == recordId }
+        if (record == null || !record.isComplete) {
+            _chat.update { it.copy(error = "This model is not fully downloaded.") }
+            return
+        }
+        if (_chat.value.loadingModel && _chat.value.recordId != recordId) return
+
+        val same = _chat.value.recordId == recordId
+        if (same) {
+            if (autoLoad && !_chat.value.ready && !_chat.value.loadingModel) {
+                loadChatModel()
+            }
+            return
+        }
+
+        generationId++
+        chatLoadEpoch++
+        val epoch = chatLoadEpoch
+        val unsupported = when {
+            !device.canRunLocalChat ->
+                "Local chat needs a 64-bit ARM phone. This device cannot load the engine."
+
+            record.files.size > 1 ->
+                "Chat currently supports single-file GGUFs. This download has ${record.files.size} shards."
+
+            else -> null
+        }
+
+        _chat.value = ChatState(
+            recordId = record.id,
+            modelName = record.displayName,
+            error = unsupported,
+        )
+        chatPreferences.edit().putString(KEY_LAST_MODEL, record.id).apply()
+
+        if (unsupported != null) {
+            viewModelScope.launch { engine.unload() }
+            return
+        }
+
+        viewModelScope.launch {
+            engine.unload()
+            if (chatLoadEpoch == epoch && _chat.value.recordId == record.id && autoLoad) {
+                loadChatModelInternal(record, epoch)
+            }
+        }
+    }
+
+    fun loadChatModel() {
+        val state = _chat.value
+        val recordId = state.recordId ?: return
+        if (state.loadingModel || state.ready) return
+        val record = downloadsStore.records.value.firstOrNull { it.id == recordId } ?: return
+        if (!device.canRunLocalChat) {
+            _chat.update { it.copy(error = "Local chat needs a 64-bit ARM phone.") }
+            return
+        }
+        if (record.files.size > 1) {
+            _chat.update {
+                it.copy(error = "Chat currently supports single-file GGUFs. Download a single-file quant.")
+            }
+            return
+        }
+
+        chatLoadEpoch++
+        val epoch = chatLoadEpoch
+        viewModelScope.launch {
+            loadChatModelInternal(record, epoch)
+        }
+    }
+
+    private suspend fun loadChatModelInternal(record: DownloadRecord, epoch: Long) {
+        if (_chat.value.recordId != record.id || chatLoadEpoch != epoch) return
+
+        val fit = ModelFit.ramFit(record.totalBytes, device)
+        if (fit.fit == Fit.WONT_RUN) {
+            _chat.update {
+                it.copy(
+                    loadingModel = false,
+                    ready = false,
+                    error = "This model needs about ${formatBytes(fit.estimatedRamBytes)} RAM, " +
+                        "but the safe budget is ${formatBytes(device.inferenceBudgetBytes)}. " +
+                        "Use a smaller quantization.",
+                )
+            }
+            return
+        }
+
+        _chat.update { it.copy(loadingModel = true, ready = false, error = null, status = null) }
+        try {
+            val path = record.firstPath
+            if (path == null) {
+                throw IllegalStateException("The model file is missing. Download it again.")
+            }
+            val contextLength = (record.contextLength ?: 2_048L)
+                .coerceIn(512L, 2_048L)
+                .toInt()
+            val loaded = engine.load(File(path), contextLength)
+
+            if (_chat.value.recordId != record.id || chatLoadEpoch != epoch) {
+                return
+            }
+
+            val note = if (fit.fit == Fit.SLOW) {
+                "Tight memory. Keep the conversation short for stable speed."
+            } else {
+                null
+            }
+            _chat.update {
+                it.copy(
+                    loadingModel = false,
+                    ready = true,
+                    error = null,
+                    status = note,
+                    contextLength = loaded.contextLength,
+                    threads = loaded.threads,
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            if (_chat.value.recordId == record.id && chatLoadEpoch == epoch) {
+                _chat.update {
+                    it.copy(
+                        loadingModel = false,
+                        ready = false,
+                        error = e.message ?: "The model could not be loaded.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun sendMessage(text: String) {
+        val message = text.trim()
+        val state = _chat.value
+        if (message.isEmpty() || !state.ready || state.generating || state.loadingModel) return
+
+        val record = downloadsStore.records.value.firstOrNull { it.id == state.recordId } ?: return
+        if (record.files.size > 1) {
+            _chat.update { it.copy(error = "Chat supports single-file GGUFs only.") }
+            return
+        }
+
+        val userMessage = ChatMessage(nextId(), ChatRole.USER, message)
+        val assistantId = nextId()
+        val assistantMessage = ChatMessage(
+            id = assistantId,
+            role = ChatRole.ASSISTANT,
+            text = "",
+            streaming = true,
+        )
+        _chat.update {
+            it.copy(
+                messages = it.messages + userMessage + assistantMessage,
+                generating = true,
+                stopping = false,
+                error = null,
+                status = null,
+            )
+        }
+
+        val generation = ++generationId
+        viewModelScope.launch {
+            val contextLength = state.contextLength.coerceAtLeast(512)
+            val history = _chat.value.messages
+                .filter { it.id != assistantId && it.text.isNotBlank() }
+                .map {
+                    ChatTurn(
+                        role = if (it.role == ChatRole.USER) "user" else "assistant",
+                        content = it.text,
+                    )
+                }
+            val trimmed = ChatPrompt.trimHistory(
+                history,
+                maxChars = (contextLength * 3).coerceIn(1_200, 6_000),
+            )
+            val system = ChatPrompt.DEFAULT_SYSTEM
+            val modelKey = record.modelId + " " + record.architecture.orEmpty()
+            val prompt = engine.format(ChatPrompt.nativeMessages(system, trimmed))
+                ?: ChatPrompt.fallback(modelKey, system, trimmed)
+
+            if (generationId != generation) return@launch
+            if (_chat.value.stopping) {
+                finishStopped(assistantId)
+                return@launch
+            }
+
+            try {
+                val result = engine.generate(prompt, maxTokens = 512) { token ->
+                    if (generationId != generation) return@generate
+                    _chat.update { current ->
+                        if (current.recordId != record.id) {
+                            current
+                        } else {
+                            current.copy(
+                                messages = current.messages.map {
+                                    if (it.id == assistantId) it.copy(text = it.text + token) else it
+                                },
+                            )
+                        }
+                    }
+                }
+
+                if (generationId == generation) {
+                    val wasStopping = _chat.value.stopping
+                    val assistant = _chat.value.messages.firstOrNull { it.id == assistantId }
+                    if (assistant == null || assistant.text.isBlank()) {
+                        _chat.update {
+                            it.copy(
+                                messages = it.messages.filterNot { msg -> msg.id == assistantId },
+                                generating = false,
+                                stopping = false,
+                                status = if (wasStopping) "Stopped" else null,
+                                error = if (wasStopping) null else "The model returned an empty response.",
+                            )
+                        }
+                    } else {
+                        val speed = if (result.durationMs > 0L) {
+                            result.tokenCount * 1_000.0 / result.durationMs
+                        } else {
+                            0.0
+                        }
+                        val meta = String.format(
+                            Locale.US,
+                            "%d tokens · %.1f tok/s",
+                            result.tokenCount,
+                            speed,
+                        )
+                        _chat.update {
+                            it.copy(
+                                messages = it.messages.map { msg ->
+                                    if (msg.id == assistantId) {
+                                        msg.copy(streaming = false, meta = meta)
+                                    } else {
+                                        msg
+                                    }
+                                },
+                                generating = false,
+                                stopping = false,
+                                status = if (wasStopping) "Stopped" else null,
+                            )
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                if (generationId == generation) {
+                    _chat.update {
+                        it.copy(
+                            messages = it.messages.map { msg ->
+                                if (msg.id == assistantId) msg.copy(streaming = false) else msg
+                            },
+                            generating = false,
+                            stopping = false,
+                            status = "Stopped",
+                        )
+                    }
+                }
+                throw e
+            } catch (e: Throwable) {
+                if (generationId == generation) {
+                    val hasText = _chat.value.messages
+                        .firstOrNull { it.id == assistantId }
+                        ?.text
+                        ?.isNotBlank() == true
+                    _chat.update {
+                        it.copy(
+                            messages = if (hasText) {
+                                it.messages.map { msg ->
+                                    if (msg.id == assistantId) msg.copy(streaming = false) else msg
+                                }
+                            } else {
+                                it.messages.filterNot { msg -> msg.id == assistantId }
+                            },
+                            generating = false,
+                            stopping = false,
+                            error = e.message ?: "Generation failed.",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopChat() {
+        if (!_chat.value.generating || _chat.value.stopping) return
+        _chat.update { it.copy(stopping = true) }
+        viewModelScope.launch {
+            engine.stop()
+        }
+    }
+
+    fun clearChat() {
+        val wasGenerating = _chat.value.generating
+        generationId++
+        if (wasGenerating) {
+            viewModelScope.launch { engine.stop() }
+        }
+        _chat.update {
+            it.copy(
+                messages = emptyList(),
+                generating = false,
+                stopping = false,
+                error = null,
+                status = null,
+            )
+        }
+    }
+
+    fun unloadChat() {
+        generationId++
+        chatLoadEpoch++
+        _chat.update {
+            it.copy(
+                loadingModel = false,
+                ready = false,
+                generating = false,
+                stopping = false,
+                error = null,
+                status = null,
+            )
+        }
+        viewModelScope.launch { engine.unload() }
+    }
+
+    private fun finishStopped(assistantId: Long) {
+        _chat.update {
+            it.copy(
+                messages = it.messages.map { msg ->
+                    if (msg.id == assistantId) msg.copy(streaming = false) else msg
+                },
+                generating = false,
+                stopping = false,
+                status = "Stopped",
+            )
+        }
+    }
+
+    private fun invalidateChat(message: String) {
+        if (_chat.value.recordId == null) return
+        generationId++
+        chatLoadEpoch++
+        _chat.update {
+            ChatState(error = message)
+        }
+        chatPreferences.edit().remove(KEY_LAST_MODEL).apply()
+        viewModelScope.launch { engine.unload() }
+    }
+
+    private fun nextId(): Long = ++nextMessageId
+
     private fun analyze(model: HfModel): ModelCard = ModelFit.analyze(model, device)
 
     private fun score(card: ModelCard): Double {
@@ -223,5 +746,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         is IOException -> e.message ?: "Network error. Check your connection."
         else -> e.message ?: "Something went wrong."
+    }
+
+    override fun onCleared() {
+        generationId++
+        chatLoadEpoch++
+        downloadsStore.pauseActive()
+        engine.release()
+        super.onCleared()
+    }
+
+    private companion object {
+        const val KEY_LAST_MODEL = "last_model"
     }
 }

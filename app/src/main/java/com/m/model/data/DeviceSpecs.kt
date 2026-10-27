@@ -17,6 +17,7 @@ data class DeviceSpecs(
     val availableRamBytes: Long,
     val freeStorageBytes: Long,
     val totalStorageBytes: Long,
+    val supportedAbis: List<String> = emptyList(),
 ) {
     val displayName: String
         get() = listOf(brand, model)
@@ -31,6 +32,10 @@ data class DeviceSpecs(
     val inferenceBudgetBytes: Long
         get() = minOf(totalRamBytes - 1_500_000_000L, (totalRamBytes * 0.75).toLong())
             .coerceAtLeast(0L)
+
+    /** The bundled llama.cpp runtime is compiled for 64-bit ARM only. */
+    val canRunLocalChat: Boolean
+        get() = supportedAbis.any { it == "arm64-v8a" }
 
     companion object {
         fun read(context: Context): DeviceSpecs {
@@ -61,6 +66,7 @@ data class DeviceSpecs(
                 availableRamBytes = memory.availMem,
                 freeStorageBytes = storage.availableBytes,
                 totalStorageBytes = storage.totalBytes,
+                supportedAbis = Build.SUPPORTED_ABIS.toList(),
             )
         }
     }

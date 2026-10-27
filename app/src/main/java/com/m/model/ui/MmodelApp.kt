@@ -3,6 +3,8 @@ package com.m.model.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
@@ -20,7 +22,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.m.model.ui.screens.BrowseScreen
+import com.m.model.ui.screens.ChatScreen
 import com.m.model.ui.screens.DetailScreen
+import com.m.model.ui.screens.DownloadsScreen
 import com.m.model.ui.screens.HomeScreen
 
 @Composable
@@ -41,6 +45,16 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
             vm = vm,
             modelId = currentDetail,
             onBack = closeDetail,
+            onOpenDownloads = {
+                detailId = null
+                tab = 2
+                vm.refreshDevice()
+            },
+            onOpenChat = { recordId ->
+                detailId = null
+                vm.openChatFor(recordId)
+                tab = 3
+            },
         )
     } else {
         Scaffold(
@@ -71,21 +85,65 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
                         label = { Text("Explore") },
                         colors = navItemColors(),
                     )
+                    NavigationBarItem(
+                        selected = tab == 2,
+                        onClick = {
+                            tab = 2
+                            vm.refreshDevice()
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Rounded.Download,
+                                contentDescription = null,
+                            )
+                        },
+                        label = { Text("Downloads") },
+                        colors = navItemColors(),
+                    )
+                    NavigationBarItem(
+                        selected = tab == 3,
+                        onClick = { tab = 3 },
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Rounded.ChatBubble,
+                                contentDescription = null,
+                            )
+                        },
+                        label = { Text("Chat") },
+                        colors = navItemColors(),
+                    )
                 }
             },
         ) { padding ->
-            if (tab == 0) {
-                HomeScreen(
+            when (tab) {
+                0 -> HomeScreen(
                     vm = vm,
                     modifier = Modifier.padding(padding),
                     onOpenModel = { detailId = it },
                     onExplore = { tab = 1 },
                 )
-            } else {
-                BrowseScreen(
+
+                1 -> BrowseScreen(
                     vm = vm,
                     modifier = Modifier.padding(padding),
                     onOpenModel = { detailId = it },
+                )
+
+                2 -> DownloadsScreen(
+                    vm = vm,
+                    modifier = Modifier.padding(padding),
+                    onOpenModel = { detailId = it },
+                    onChat = { recordId ->
+                        vm.openChatFor(recordId)
+                        tab = 3
+                    },
+                    onBrowse = { tab = 1 },
+                )
+
+                else -> ChatScreen(
+                    vm = vm,
+                    modifier = Modifier.padding(padding),
+                    onBrowse = { tab = 1 },
                 )
             }
         }
