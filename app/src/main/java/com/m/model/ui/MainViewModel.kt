@@ -264,7 +264,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val detailed = hydrate(candidates.map { it.id }, 24)
                 cache.putAll(detailed.associateBy { it.id })
                 recommendations = detailed
-                    .filter { !it.model.gguf?.chatTemplate.isNullOrBlank() }
+                    .filter { card ->
+                        val tag = card.model.pipelineTag
+                        !card.model.gguf?.chatTemplate.isNullOrBlank() &&
+                            (tag == null || isChatPipeline(tag))
+                    }
                     .filter { it.fit.fit == Fit.WORKS || it.fit.fit == Fit.SLOW }
                     .sortedByDescending { score(it) }
                     .take(12)

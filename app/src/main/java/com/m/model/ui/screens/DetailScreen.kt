@@ -796,6 +796,11 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
     }
     val modelContext = (card.model.gguf?.contextLength
         ?: card.model.config?.maxPositionEmbeddings)?.takeIf { it > 0L }
+    val memoryFormula = if (card.variants.isNotEmpty()) {
+        "1.15× GGUF size + 600 MB overhead"
+    } else {
+        "1.2× weight size + 900 MB overhead"
+    }
 
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -894,7 +899,7 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
                 )
             }
             Text(
-                text = "Memory = 1.15× GGUF size + 600 MB overhead. Safe budget = min(75% of RAM, RAM − 1.5 GB). Download check reserves ${ModelFit.STORAGE_RESERVE_BYTES / 1_000_000} MB for Android.",
+                text = "Memory = $memoryFormula. Safe budget = min(75% of RAM, RAM − 1.5 GB). Download check reserves ${ModelFit.STORAGE_RESERVE_BYTES / 1_000_000} MB for Android.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
