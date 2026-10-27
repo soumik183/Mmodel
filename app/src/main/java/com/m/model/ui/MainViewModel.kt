@@ -1,6 +1,7 @@
 package com.m.model.ui
 
 import android.app.Application
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -36,20 +37,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Locale
 import kotlin.math.log10
 
+@Immutable
 data class BrowseState(
     val query: String = "",
     val sort: ModelSort = ModelSort.TRENDING,
-    val ggufOnly: Boolean = false,
+    val ggufOnly: Boolean = true,
     val items: List<ModelCard> = emptyList(),
     val loading: Boolean = true,
     val error: String? = null,
 )
 
+@Immutable
 data class DetailState(
     val id: String = "",
     val card: ModelCard? = null,
@@ -59,6 +63,7 @@ data class DetailState(
 
 enum class ChatRole { USER, ASSISTANT }
 
+@Immutable
 data class ChatMessage(
     val id: Long,
     val role: ChatRole,
@@ -67,6 +72,7 @@ data class ChatMessage(
     val meta: String? = null,
 )
 
+@Immutable
 data class ChatState(
     val recordId: String? = null,
     val modelName: String = "",
@@ -88,6 +94,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val api = HfApi()
     private val cache = mutableMapOf<String, ModelCard>()
     private var searchJob: Job? = null
+    private var recommendationsJob: Job? = null
+    private var recommendationsEpoch = 0
+    private var browseRequested = false
 
     var browse by mutableStateOf(BrowseState())
         private set
@@ -124,7 +133,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadRecommendations()
-        scheduleSearch(0)
 
         val lastId = chatPreferences.getString(KEY_LAST_MODEL, null)
         if (!lastId.isNullOrBlank()) {
@@ -176,6 +184,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scheduleSearch(0)
     }
 
+    fun ensureBrowseLoaded() {
+        if (browseRequested) return
+        scheduleSearch(0)
+    }
+
     fun refreshRecommendations() {
         loadRecommendations()
     }
@@ -202,6 +215,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun scheduleSearch(delayMs: Long) {
+        browseRequested = true
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             if (delayMs > 0) delay(delayMs)
@@ -212,7 +226,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             browse = browse.copy(loading = true, error = null)
             try {
-                val models = api.listModels(query, sort, ggufOnly)
+                val models = api.listModels(query, sort, ggufOnly, withGguf = true)
                 val cards = models.map { analyze(it) }
                 browse = browse.copy(items = cards, loading = false, error = null)
 
@@ -220,11 +234,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // show a real fit without opening each model.
                 val unknown = cards.filter { it.downloadBytes == null }.take(8)
                 if (unknown.isNotEmpty()) {
-                    val detailed = hydrate(unknown.map { it.id }, 8)
+                    fun apply(card: ModelCard) {
+                        cache[card.id] = card
+                        if (browse.query == query && browse.sort == sort && browse.ggufOnly == ggufOnly) {
+                            browse = browse.copy(
+                                items = browse.items.map { if (it.id == card.id) card else it },
+                            )
+                        }
+                    }
+                    val detailed = hydrate(unknown.map { it.id }, 8, ::apply)
                     if (detailed.isNotEmpty()) {
                         val byId = detailed.associateBy { it.id }
                         cache.putAll(byId)
-                        browse = browse.copy(items = browse.items.map { byId[it.id] ?: it })
+                        if (browse.query == query && browse.sort == sort && browse.ggufOnly == ggufOnly) {
+                            browse = browse.copy(items = browse.items.map { byId[it.id] ?: it })
+                        }
                     }
                 }
             } catch (e: CancellationException) {
@@ -236,9 +260,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadRecommendations() {
+        val epoch = ++recommendationsEpoch
+        recommendationsJob?.cancel()
         recLoading = true
         recError = null
-        viewModelScope.launch {
+        recommendationsJob = viewModelScope.launch {
             try {
                 val models = api.listModels(
                     query = "",
@@ -247,6 +273,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     limit = 100,
                     withGguf = true,
                 )
+                if (recommendationsEpoch != epoch) return@launch
                 val candidates = models
                     .filter { model ->
                         val gguf = model.gguf
@@ -261,34 +288,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .sortedByDescending { score(it) }
                     .take(24)
 
-                val detailed = hydrate(candidates.map { it.id }, 24)
-                cache.putAll(detailed.associateBy { it.id })
-                recommendations = detailed
-                    .filter { card ->
-                        val tag = card.model.pipelineTag
-                        !card.model.gguf?.chatTemplate.isNullOrBlank() &&
-                            (tag == null || isChatPipeline(tag))
+                val detailed = hydrate(candidates.map { it.id }, 24) { card ->
+                    if (recommendationsEpoch == epoch) {
+                        cache[card.id] = card
+                        recommendations = recommendationPicks(recommendations + card)
                     }
-                    .filter { it.fit.fit == Fit.WORKS || it.fit.fit == Fit.SLOW }
-                    .sortedByDescending { score(it) }
-                    .take(12)
+                }
+                if (recommendationsEpoch != epoch) return@launch
+                cache.putAll(detailed.associateBy { it.id })
+                recommendations = recommendationPicks(detailed)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                recError = friendlyError(e)
+                if (recommendationsEpoch == epoch) recError = friendlyError(e)
             } finally {
-                recLoading = false
+                if (recommendationsEpoch == epoch) recLoading = false
             }
         }
     }
 
-    private suspend fun hydrate(ids: List<String>, limit: Int): List<ModelCard> =
+    private fun recommendationPicks(cards: List<ModelCard>): List<ModelCard> =
+        cards
+            .distinctBy { it.id }
+            .filter { card ->
+                val tag = card.model.pipelineTag
+                !card.model.gguf?.chatTemplate.isNullOrBlank() &&
+                    (tag == null || isChatPipeline(tag))
+            }
+            .filter { it.fit.fit == Fit.WORKS || it.fit.fit == Fit.SLOW }
+            .sortedByDescending { score(it) }
+            .take(12)
+
+    private suspend fun hydrate(
+        ids: List<String>,
+        limit: Int,
+        onCard: ((ModelCard) -> Unit)? = null,
+    ): List<ModelCard> =
         withTimeoutOrNull(25_000L) {
             coroutineScope {
                 ids.distinct().take(limit).map { id ->
                     async {
                         try {
-                            analyze(api.getModel(id))
+                            analyze(api.getModel(id)).also { onCard?.invoke(it) }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Exception) {
@@ -312,9 +353,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openModel(id: String) {
         if (id.isBlank()) return
 
-        val cached = cache[id]?.takeIf { it.downloadBytes != null }
+        val cached = cache[id]
         if (detail.id == id && (cached != null || detail.loading)) {
-            if (cached != null && detail.card?.downloadBytes == null) {
+            if (cached != null && detail.card == null) {
                 detail = DetailState(id = id, card = cached)
             }
             return
@@ -335,9 +376,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 if (detail.id == id) {
-                    val fallback = cache[id]
+                    val fallback = cache[id]?.takeIf {
+                        it.model.siblings.isNotEmpty() || it.variants.isNotEmpty()
+                    }
                     detail = if (fallback != null) {
-                        DetailState(id = id, card = fallback)
+                        DetailState(id = id, card = fallback, error = friendlyError(e))
                     } else {
                         DetailState(id = id, error = friendlyError(e))
                     }
@@ -800,13 +843,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         is UnknownHostException ->
             "No internet connection. Check your network and try again."
 
-        is SocketTimeoutException ->
+        is SocketTimeoutException, is InterruptedIOException ->
             "Hugging Face took too long to answer. Try again."
 
         is HfHttpException -> when (e.code) {
             429 -> "Hugging Face is rate-limiting this device. Wait a minute, then retry."
             in 500..599 -> "Hugging Face is having trouble (${e.code}). Try again shortly."
-            401, 403 -> "This model is private or gated on Hugging Face."
+            401, 403 -> "This model is private or gated. Open it on Hugging Face, accept access, then retry."
+            404 -> "This model was not found. It may have been renamed or removed."
+            400 -> "Hugging Face could not read this model's metadata. Try again."
             else -> "Hugging Face returned error ${e.code}."
         }
 

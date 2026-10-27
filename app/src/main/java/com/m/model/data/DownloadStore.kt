@@ -2,6 +2,7 @@ package com.m.model.data
 
 import android.content.Context
 import android.os.StatFs
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -34,6 +35,7 @@ import java.util.concurrent.TimeUnit
 @Serializable
 enum class DownloadStatus { DOWNLOADING, PAUSED, DONE, ERROR }
 
+@Immutable
 @Serializable
 data class DownloadFile(
     val remoteName: String,
@@ -43,6 +45,7 @@ data class DownloadFile(
     val done: Boolean = false,
 )
 
+@Immutable
 @Serializable
 data class DownloadRecord(
     val id: String,
@@ -311,7 +314,7 @@ class DownloadStore(context: Context) {
 
         val requestBuilder = Request.Builder()
             .url(resolveUrl(record.modelId, file.remoteName))
-            .header("User-Agent", "Mmodel/1.2 (Android)")
+            .header("User-Agent", "Mmodel/1.3 (Android)")
             .header("Accept-Encoding", "identity")
         if (existing > 0 && (file.bytesTotal <= 0L || existing < file.bytesTotal)) {
             requestBuilder.header("Range", "bytes=$existing-")
@@ -350,6 +353,7 @@ class DownloadStore(context: Context) {
 
                 if (expected > 0L && file.bytesTotal <= 0L) {
                     updateFileTotal(recordId, index, expected)
+                    ensureStorage(dir, file.copy(bytesTotal = expected), existing)
                 }
 
                 body.byteStream().use { input ->
@@ -407,6 +411,10 @@ class DownloadStore(context: Context) {
 
         val actual = target.takeIf { it.isFile }?.length() ?: 0L
         if (actual <= 0L) throw DownloadFailure("The downloaded file is empty. Tap Resume.")
+        if (file.bytesTotal > 0L && actual != file.bytesTotal) {
+            throw DownloadFailure("The downloaded file is incomplete. Tap Resume to repair it.")
+        }
+        if (file.bytesTotal <= 0L) updateFileTotal(recordId, index, actual)
 
         _records.update { list ->
             list.map { item ->

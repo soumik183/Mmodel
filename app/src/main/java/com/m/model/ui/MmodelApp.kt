@@ -1,7 +1,22 @@
 package com.m.model.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Download
@@ -9,23 +24,38 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.m.model.ui.screens.BrowseScreen
 import com.m.model.ui.screens.ChatScreen
 import com.m.model.ui.screens.DetailScreen
 import com.m.model.ui.screens.DownloadsScreen
 import com.m.model.ui.screens.HomeScreen
+
+private data class AppTab(val icon: ImageVector, val label: String)
+
+private val appTabs = listOf(
+    AppTab(Icons.Rounded.Home, "Home"),
+    AppTab(Icons.Rounded.Search, "Explore"),
+    AppTab(Icons.Rounded.Download, "Downloads"),
+    AppTab(Icons.Rounded.ChatBubble, "Chat"),
+)
 
 @Composable
 fun MmodelApp(vm: MainViewModel = viewModel()) {
@@ -57,105 +87,140 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
             },
         )
     } else {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    NavigationBarItem(
-                        selected = tab == 0,
-                        onClick = { tab = 0 },
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Home,
-                                contentDescription = null,
-                            )
+        LaunchedEffect(tab) {
+            if (tab == 1) vm.ensureBrowseLoaded()
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.background,
+                            MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                    ),
+                ),
+        ) {
+            Scaffold(
+                containerColor = Color.Transparent,
+                bottomBar = {
+                    MmodelBottomBar(
+                        selected = tab,
+                        onSelect = { index ->
+                            if (index == 2) vm.refreshDevice()
+                            tab = index
                         },
-                        label = { Text("Home") },
-                        colors = navItemColors(),
                     )
-                    NavigationBarItem(
-                        selected = tab == 1,
-                        onClick = { tab = 1 },
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Search,
-                                contentDescription = null,
-                            )
-                        },
-                        label = { Text("Explore") },
-                        colors = navItemColors(),
+                },
+            ) { padding ->
+                when (tab) {
+                    0 -> HomeScreen(
+                        vm = vm,
+                        modifier = Modifier.padding(padding),
+                        onOpenModel = { detailId = it },
+                        onExplore = { tab = 1 },
                     )
-                    NavigationBarItem(
-                        selected = tab == 2,
-                        onClick = {
-                            tab = 2
-                            vm.refreshDevice()
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Download,
-                                contentDescription = null,
-                            )
-                        },
-                        label = { Text("Downloads") },
-                        colors = navItemColors(),
+
+                    1 -> BrowseScreen(
+                        vm = vm,
+                        modifier = Modifier.padding(padding),
+                        onOpenModel = { detailId = it },
                     )
-                    NavigationBarItem(
-                        selected = tab == 3,
-                        onClick = { tab = 3 },
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Rounded.ChatBubble,
-                                contentDescription = null,
-                            )
+
+                    2 -> DownloadsScreen(
+                        vm = vm,
+                        modifier = Modifier.padding(padding),
+                        onOpenModel = { detailId = it },
+                        onChat = { recordId ->
+                            vm.openChatFor(recordId)
+                            tab = 3
                         },
-                        label = { Text("Chat") },
-                        colors = navItemColors(),
+                        onBrowse = { tab = 1 },
+                    )
+
+                    else -> ChatScreen(
+                        vm = vm,
+                        modifier = Modifier.padding(padding),
+                        onBrowse = { tab = 1 },
                     )
                 }
-            },
-        ) { padding ->
-            when (tab) {
-                0 -> HomeScreen(
-                    vm = vm,
-                    modifier = Modifier.padding(padding),
-                    onOpenModel = { detailId = it },
-                    onExplore = { tab = 1 },
-                )
-
-                1 -> BrowseScreen(
-                    vm = vm,
-                    modifier = Modifier.padding(padding),
-                    onOpenModel = { detailId = it },
-                )
-
-                2 -> DownloadsScreen(
-                    vm = vm,
-                    modifier = Modifier.padding(padding),
-                    onOpenModel = { detailId = it },
-                    onChat = { recordId ->
-                        vm.openChatFor(recordId)
-                        tab = 3
-                    },
-                    onBrowse = { tab = 1 },
-                )
-
-                else -> ChatScreen(
-                    vm = vm,
-                    modifier = Modifier.padding(padding),
-                    onBrowse = { tab = 1 },
-                )
             }
         }
     }
 }
 
 @Composable
-private fun navItemColors(): androidx.compose.material3.NavigationBarItemColors =
-    NavigationBarItemDefaults.colors(
-        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        selectedTextColor = MaterialTheme.colorScheme.onSurface,
-        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.97f),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+        ),
+        shadowElevation = 10.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            appTabs.forEachIndexed { index, item ->
+                val active = selected == index
+                val background by animateColorAsState(
+                    targetValue = if (active) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        Color.Transparent
+                    },
+                    label = "navBackground",
+                )
+                val content by animateColorAsState(
+                    targetValue = if (active) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    label = "navContent",
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(22.dp))
+                        .selectable(
+                            selected = active,
+                            onClick = { onSelect(index) },
+                            role = Role.Tab,
+                        )
+                        .background(background),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = content,
+                        )
+                        Text(
+                            text = item.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = content,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

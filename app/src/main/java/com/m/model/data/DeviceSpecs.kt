@@ -5,6 +5,9 @@ import android.content.Context
 import android.os.Build
 import android.os.StatFs
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class DeviceSpecs(
     val brand: String,
     val model: String,

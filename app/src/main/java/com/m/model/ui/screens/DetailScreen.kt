@@ -3,6 +3,7 @@ package com.m.model.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,9 +34,11 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,6 +56,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,8 +102,10 @@ fun DetailScreen(
 
     val state = vm.detail
     val card = state.card
+    val device = vm.device
     val context = LocalContext.current
     val downloads by vm.downloads.collectAsState()
+    var pendingDownload by remember(modelId) { mutableStateOf<GgufVariant?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -178,15 +186,23 @@ fun DetailScreen(
             else -> {
                 DetailContent(
                     card = card,
-                    device = vm.device,
+                    device = device,
                     downloads = downloads,
                     downloadNotice = vm.downloadNotice,
+                    detailError = state.error,
                     modifier = Modifier.padding(padding),
                     onOpen = { openOnHuggingFace(context, card.id) },
-                    onDownload = { variant -> vm.startDownload(card, variant) },
+                    onDownload = { variant ->
+                        if (needsDownloadWarning(card, variant, device)) {
+                            pendingDownload = variant
+                        } else {
+                            vm.startDownload(card, variant)
+                        }
+                    },
                     onPause = vm::pauseDownload,
                     onResume = vm::resumeDownload,
                     onClearNotice = vm::clearDownloadNotice,
+                    onRetry = vm::retryDetail,
                     onOpenChat = onOpenChat,
                     onOpenDownloads = onOpenDownloads,
                     onRefreshDevice = vm::refreshDevice,
@@ -194,6 +210,153 @@ fun DetailScreen(
             }
         }
     }
+
+    pendingDownload?.let { variant ->
+        card?.let {
+            DownloadWarningDialog(
+                card = it,
+                variant = variant,
+                device = device,
+                onDismiss = { pendingDownload = null },
+                onConfirm = {
+                    pendingDownload = null
+                    vm.startDownload(it, variant)
+                },
+            )
+        }
+    }
+}
+
+
+private val chatPipelines = setOf(
+    "text-generation",
+    "image-text-to-text",
+    "text2text-generation",
+    "conversational",
+)
+
+private fun ModelCard.chatPipelineOk(): Boolean {
+    val pipeline = model.pipelineTag?.lowercase() ?: return true
+    return pipeline in chatPipelines
+}
+
+private fun needsDownloadWarning(card: ModelCard, variant: GgufVariant, device: DeviceSpecs): Boolean =
+    variant.fit.fit != Fit.WORKS ||
+        variant.fit.storageBlocked ||
+        variant.sharded ||
+        variant.bytes <= 0L ||
+        !device.canRunLocalChat ||
+        card.model.gguf?.chatTemplate.isNullOrBlank() ||
+        !card.chatPipelineOk()
+
+@Composable
+private fun DownloadWarningDialog(
+    card: ModelCard,
+    variant: GgufVariant,
+    device: DeviceSpecs,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val (accent, _) = fitColors(variant.fit.fit)
+    val title = when (variant.fit.fit) {
+        Fit.WONT_RUN -> "This model likely won't run"
+        Fit.SLOW -> "This model may be slow"
+        Fit.UNKNOWN -> "Fit can't be verified"
+        Fit.WORKS -> "Download with a warning?"
+    }
+    val warnings = buildList {
+        when (variant.fit.fit) {
+            Fit.WONT_RUN -> add("The fit check says this quant is too large for this phone. Local chat may crash or fail after downloading.")
+            Fit.SLOW -> add("This quant is close to the safe RAM limit. Generation may be slow or stop when other apps are running.")
+            Fit.UNKNOWN -> add("Hugging Face did not publish a complete file size, so fit and storage use cannot be verified.")
+            Fit.WORKS -> Unit
+        }
+        if (variant.bytes <= 0L) {
+            add("The exact download size is unknown. Progress starts after Hugging Face responds.")
+        }
+        if (variant.fit.storageBlocked) {
+            add("Free storage is below the 300 MB reserve. Free up space before downloading.")
+        }
+        if (variant.sharded) {
+            add("Local chat currently supports single-file GGUFs only. This sharded download can be saved, but not loaded in Chat.")
+        }
+        if (!device.canRunLocalChat) {
+            add("Local chat needs a 64-bit ARM device. The download can be saved, but chat is unavailable here.")
+        }
+        if (card.model.gguf?.chatTemplate.isNullOrBlank()) {
+            add("This repo does not expose a chat template. Chat will use a fallback template when available.")
+        }
+        if (!card.chatPipelineOk()) {
+            add("Hugging Face lists this repo as ${card.model.pipelineTag}, not text generation. Chat may not work.")
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.WarningAmber,
+                contentDescription = null,
+                tint = accent,
+            )
+        },
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "${card.name} · ${variant.quant}",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                warnings.forEach { warning ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            text = "•",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = accent,
+                        )
+                        Text(
+                            text = warning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(
+                    text = if (variant.bytes > 0L) {
+                        "Download size: ${formatBytes(variant.bytes)}"
+                    } else {
+                        "Download size: reported by Hugging Face on start"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (variant.fit.fit == Fit.WONT_RUN) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                ),
+            ) {
+                Text("Download anyway")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = MaterialTheme.colorScheme.surface,
+    )
 }
 
 @Composable
@@ -202,12 +365,14 @@ private fun DetailContent(
     device: DeviceSpecs,
     downloads: List<DownloadRecord>,
     downloadNotice: String?,
+    detailError: String?,
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onDownload: (GgufVariant) -> Unit,
     onPause: (String) -> Unit,
     onResume: (String) -> Unit,
     onClearNotice: () -> Unit,
+    onRetry: () -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenDownloads: () -> Unit,
     onRefreshDevice: () -> Unit,
@@ -244,6 +409,18 @@ private fun DetailContent(
             }
         }
 
+        detailError?.let { error ->
+            item {
+                MessageCard(
+                    icon = Icons.Rounded.CloudOff,
+                    title = "Some details may be out of date",
+                    message = error,
+                    actionLabel = "Retry",
+                    onAction = onRetry,
+                )
+            }
+        }
+
         if (card.model.tags.isNotEmpty()) {
             item {
                 Row(
@@ -276,10 +453,10 @@ private fun DetailContent(
         item {
             SectionHeader(
                 title = "Download a quantization",
-                subtitle = if (card.variants.isEmpty()) {
-                    "No GGUF files in this repo"
-                } else {
-                    "Real file sizes from Hugging Face"
+                subtitle = when {
+                    card.variants.isEmpty() -> "No GGUF files in this repo"
+                    card.variants.all { it.bytes <= 0L } -> "Sizes not reported by Hugging Face"
+                    else -> "Real file sizes from Hugging Face"
                 },
                 trailing = {
                     if (card.variants.isNotEmpty()) {
@@ -308,7 +485,7 @@ private fun DetailContent(
                 )
             }
         } else {
-            items(card.variants, key = { it.key }) { variant ->
+            items(card.variants, key = { it.key }, contentType = { "variant" }) { variant ->
                 val record = downloads.firstOrNull {
                     it.id == DownloadRecord.idFor(card.id, variant)
                 }
@@ -387,9 +564,11 @@ private fun VariantCard(
         device.canRunLocalChat &&
         shownFit != Fit.WONT_RUN
 
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -496,7 +675,11 @@ private fun VariantCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = "${(progress * 100).toInt()}% · ${formatBytes(record.doneBytes)} of ${formatBytes(record.totalBytes)}",
+                            text = if (record.totalBytes > 0L) {
+                                "${(progress * 100).toInt()}% · ${formatBytes(record.doneBytes)} of ${formatBytes(record.totalBytes)}"
+                            } else {
+                                "${formatBytes(record.doneBytes)} downloaded · size pending"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
@@ -547,8 +730,10 @@ private fun VariantCard(
                         Text(
                             if (variant.fit.storageBlocked) {
                                 "Not enough storage"
-                            } else {
+                            } else if (variant.bytes > 0L) {
                                 "Download ${formatBytes(variant.bytes)}"
+                            } else {
+                                "Download"
                             },
                         )
                     }
@@ -645,6 +830,9 @@ private fun FitCard(card: ModelCard, device: DeviceSpecs) {
 
         card.fit.fit == Fit.WONT_RUN ->
             "It needs more RAM than this phone can safely give an app."
+
+        card.variants.isNotEmpty() ->
+            "Hugging Face did not publish a file size, so fit can't be verified."
 
         else ->
             "No weight-file sizes were published for this repo."
@@ -802,9 +990,11 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
         "1.2× weight size + 900 MB overhead"
     }
 
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -983,9 +1173,11 @@ private fun ComparisonRow(
 @Composable
 private fun ModelDetailsCard(card: ModelCard) {
     val bestVariant = card.bestVariant
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -1022,9 +1214,11 @@ private fun ModelDetailsCard(card: ModelCard) {
 
 @Composable
 private fun DeviceCheckCard(device: DeviceSpecs, onRefresh: () -> Unit) {
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),

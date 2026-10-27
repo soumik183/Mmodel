@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -31,7 +32,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -145,7 +145,11 @@ fun DownloadsScreen(
                 )
             }
         } else {
-            items(records, key = { it.id }) { record ->
+            items(
+                items = records,
+                key = { it.id },
+                contentType = { "download" },
+            ) { record ->
                 DownloadCard(
                     record = record,
                     device = device,
@@ -318,9 +322,13 @@ private fun DownloadCard(
         device.canRunLocalChat &&
         fit.fit != Fit.WONT_RUN
 
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        tonalElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -370,8 +378,10 @@ private fun DownloadCard(
                 Text(
                     text = if (record.isComplete) {
                         formatBytes(record.totalBytes)
-                    } else {
+                    } else if (record.totalBytes > 0L) {
                         "${formatBytes(record.doneBytes)} / ${formatBytes(record.totalBytes)}"
+                    } else {
+                        "${formatBytes(record.doneBytes)} downloaded"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -406,10 +416,14 @@ private fun DownloadCard(
                         .height(8.dp)
                         .clip(CircleShape),
                     color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 )
                 Text(
-                    text = "${(progress * 100).toInt()}% · ${statusLabel(record.status)}",
+                    text = if (record.totalBytes > 0L) {
+                        "${(progress * 100).toInt()}% · ${statusLabel(record.status)}"
+                    } else {
+                        "${statusLabel(record.status)} · size pending"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

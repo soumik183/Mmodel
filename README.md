@@ -17,11 +17,13 @@ Choose a GGUF quantization, download it with visible progress and a real path, t
 - **Hugging Face search** — 50 results per request, sort by trending / likes / recently updated, GGUF filter
 - **Real-data fit estimate** — actual GGUF file sizes (multi-shard quants summed), per-quant fit badges, RAM overhead, and free-storage checks
 - **Model vs phone comparison** — side-by-side memory, download and local-chat checks using the same numbers as the verdict
-- **Recommended for you** — chat-ready GGUF picks size-checked against this phone's RAM and free storage
+- **Recommended for you** — chat-ready GGUF picks size-checked against this phone's RAM and free storage, streamed in as soon as each real size arrives
 - **Model details** — parameters, context length, downloadable quants, downloads, likes, tags, and a direct Hugging Face link
 - **Downloads** — choose a quantization, see the exact app-private folder and file sizes, pause/resume with HTTP Range, delete with confirmation, and browse downloaded models
+- **Download guardrails** — warns when a quant is Slow / Won't run / missing a reported size, is sharded, or is not chat-ready before the download starts
 - **Local chat** — llama.cpp inference on `arm64-v8a`, streaming tokens, stop generation, clear conversation, unload model, and a conservative 2K context
-- **Material 3 UI** — custom modern corner shapes, letter avatars, gradients, light and dark themes
+- **Premium Material 3 UI** — an aurora indigo/teal palette, floating navigation pill, adaptive launcher icon, custom squircle letter avatars, and light/dark themes
+- **Light on startup** — Explore loads the catalog on first visit, while recommendations appear progressively instead of waiting for every size lookup
 - No accounts, no analytics, no tracking. Only the `INTERNET` permission.
 
 ## Install the APK
@@ -108,14 +110,15 @@ app/src/main/java/com/m/model/
   ui/screens/     Home, Explore, Model detail, Downloads, Chat
   ui/theme/       Material 3 theme and shapes
 app/src/test/     JVM tests for fit, quantization parsing, chat prompts
+design/            Source SVG for the adaptive launcher icon
 .github/workflows/android.yml
 ```
 
 ## Notes / limitations
 
-- Hugging Face's public API is used without a token. Heavy use can be rate-limited (HTTP 429).
-- The Explore screen loads the top 50 matches per query; the leading cards are enriched with full file sizes, and any remaining card loads its exact sizes when opened.
-- Only published weight-file sizes are used. Repos without sizes show **Unknown**.
+- Hugging Face's public API is used without a token. Heavy use can be rate-limited (HTTP 429); transient 5xx and rate-limit responses are retried with backoff.
+- The Explore screen loads on first visit (top 50 matches per query); the leading cards are enriched with full file sizes, and any remaining card loads its exact sizes when opened.
+- Only published weight-file sizes are used. Repos without sizes show **Unknown**; those files can still be downloaded with a warning, and the app reads the size from the download response when available.
 - Local chat is experimental and limited to single-file GGUFs on `arm64-v8a`.
 - Gated/private models cannot be downloaded through the app; the link opens Hugging Face.
 - Debug APK only. A release build would need signing.

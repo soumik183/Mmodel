@@ -17,6 +17,9 @@ class HfApi(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build(),
 ) {
     private val json = Json {
@@ -46,7 +49,8 @@ class HfApi(
             }
             .build()
 
-        json.decodeFromString<List<HfModel>>(fetch(url.toString()))
+        val body = fetch(url.toString())
+        decode { json.decodeFromString<List<HfModel>>(body) }
     }
 
     suspend fun getModel(id: String): HfModel = withContext(Dispatchers.IO) {
@@ -56,19 +60,59 @@ class HfApi(
             .addQueryParameter("blobs", "true")
             .build()
 
-        json.decodeFromString<HfModel>(fetch(url.toString()))
+        val body = fetch(url.toString())
+        decode { json.decodeFromString<HfModel>(body) }
+    }
+
+    private inline fun <T> decode(block: () -> T): T = try {
+        block()
+    } catch (e: Exception) {
+        throw IOException("Hugging Face sent an unreadable response. Try again.", e)
     }
 
     private fun fetch(url: String): String {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mmodel/1.2 (Android)")
+            .header("User-Agent", "Mmodel/1.3 (Android)")
+            .header("Accept", "application/json")
             .build()
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw HfHttpException(response.code)
-            return response.body?.string()
-                ?: throw IOException("Empty response from Hugging Face")
+        var lastError: IOException? = null
+        for (attempt in 0 until 3) {
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        return response.body?.string()
+                            ?: throw IOException("Hugging Face returned an empty response.")
+                    }
+
+                    val retryable = response.code == 429 || response.code in 500..599
+                    if (retryable && attempt < 2) {
+                        val retryAfterMs = response.header("Retry-After")
+                            ?.toLongOrNull()
+                            ?.times(1_000L)
+                        sleepBeforeRetry(attempt, retryAfterMs)
+                    } else {
+                        throw HfHttpException(response.code)
+                    }
+                }
+            } catch (e: HfHttpException) {
+                throw e
+            } catch (e: IOException) {
+                lastError = e
+                if (attempt >= 2) throw e
+                sleepBeforeRetry(attempt, null)
+            }
+        }
+        throw lastError ?: IOException("Hugging Face request failed.")
+    }
+
+    private fun sleepBeforeRetry(attempt: Int, retryAfterMs: Long?) {
+        val wait = retryAfterMs ?: (500L shl attempt)
+        try {
+            Thread.sleep(wait.coerceIn(300L, 5_000L))
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 }

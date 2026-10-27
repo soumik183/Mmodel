@@ -1,7 +1,10 @@
 package com.m.model.data
 
+import androidx.compose.runtime.Immutable
+
 enum class Fit { WORKS, SLOW, WONT_RUN, UNKNOWN }
 
+@Immutable
 data class FitResult(
     val fit: Fit,
     val estimatedRamBytes: Long?,
@@ -9,11 +12,13 @@ data class FitResult(
     val storageBlocked: Boolean = false,
 )
 
+@Immutable
 data class GgufFile(
     val name: String,
     val bytes: Long,
 )
 
+@Immutable
 data class GgufVariant(
     val key: String,
     val quant: String,
@@ -26,6 +31,7 @@ data class GgufVariant(
     val fileCount: Int get() = files.size
 }
 
+@Immutable
 data class ModelCard(
     val model: HfModel,
     val downloadBytes: Long?,
@@ -37,7 +43,7 @@ data class ModelCard(
     val id: String get() = model.id
     val name: String get() = model.id.substringAfterLast('/').ifBlank { model.id }
     val author: String get() = model.author ?: model.id.substringBefore('/', "")
-    val bestVariant: GgufVariant? get() = variants.minByOrNull { it.bytes }
+    val bestVariant: GgufVariant? get() = variants.filter { it.bytes > 0L }.minByOrNull { it.bytes }
 }
 
 object ModelFit {
@@ -66,15 +72,19 @@ object ModelFit {
 
     fun analyze(model: HfModel, device: DeviceSpecs): ModelCard {
         val variants = ggufVariants(model, device)
-        val isGguf = variants.isNotEmpty()
-        val best = variants.minByOrNull { it.bytes }
-        val downloadBytes = best?.bytes ?: otherWeightBytes(model)
+        val best = variants.filter { it.bytes > 0L }.minByOrNull { it.bytes }
+        val otherWeights = otherWeightBytes(model)
+        val downloadBytes = best?.bytes ?: if (variants.isEmpty()) otherWeights else null
 
         val parameters = model.gguf?.total?.takeIf { it > 0 }
             ?: model.safetensors?.total?.takeIf { it > 0 }
             ?: model.safetensors?.parameters?.values?.sum()?.takeIf { it > 0 }
 
-        val fit = best?.fit ?: fitFor(downloadBytes, device, isGguf = false)
+        val fit = best?.fit ?: if (variants.isEmpty() && otherWeights != null) {
+            fitFor(otherWeights, device, isGguf = false)
+        } else {
+            FitResult(Fit.UNKNOWN, null, 0f)
+        }
 
         return ModelCard(
             model = model,
@@ -161,7 +171,6 @@ object ModelFit {
         val shardBases = mutableMapOf<String, String>()
 
         model.siblings.forEach { sibling ->
-            val size = sibling.size?.takeIf { it > 0 } ?: return@forEach
             val name = sibling.rfilename
             if (!name.endsWith(".gguf", ignoreCase = true)) return@forEach
 
@@ -184,24 +193,29 @@ object ModelFit {
 
         return groups.map { (key, siblings) ->
             val sorted = siblings.sortedBy { it.rfilename.lowercase() }
-            val files = sorted.map { GgufFile(it.rfilename, it.size ?: 0L) }
-            val bytes = files.sumOf { it.bytes }
+            val files = sorted.map { GgufFile(it.rfilename, it.byteSize ?: 0L) }
+            // A partial size would understate the fit; show unknown instead.
+            val bytes = if (files.all { it.bytes > 0L }) files.sumOf { it.bytes } else 0L
             val baseName = shardBases[key.removePrefix("shard:")] ?: files.first().name
             GgufVariant(
                 key = key,
                 quant = quantLabel(baseName),
                 files = files,
                 bytes = bytes,
-                fit = fitFor(bytes, device),
+                fit = if (bytes > 0L) {
+                    fitFor(bytes, device)
+                } else {
+                    FitResult(Fit.UNKNOWN, null, 0f)
+                },
                 sharded = files.size > 1 || key.startsWith("shard:"),
             )
-        }.sortedBy { it.bytes }
+        }.sortedWith(compareBy({ it.bytes <= 0L }, { it.bytes }))
     }
 
     private fun otherWeightBytes(model: HfModel): Long? {
         fun sum(extension: String): Long = model.siblings
             .filter { it.rfilename.endsWith(extension, ignoreCase = true) }
-            .mapNotNull { it.size?.takeIf { size -> size > 0 } }
+            .mapNotNull { it.byteSize }
             .sum()
 
         val safetensors = sum(".safetensors")

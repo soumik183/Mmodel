@@ -1,5 +1,6 @@
 package com.m.model.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -30,8 +32,8 @@ import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,7 +45,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +66,7 @@ import com.m.model.ui.components.SectionHeader
 import com.m.model.ui.components.SpecTile
 import com.m.model.ui.formatBytes
 import com.m.model.ui.formatParams
+import com.m.model.ui.theme.BrandGradient
 
 @Composable
 fun HomeScreen(
@@ -102,7 +108,7 @@ fun HomeScreen(
         }
 
         when {
-            recLoading -> item { RecommendationLoading() }
+            recLoading && recommendations.isEmpty() -> item { RecommendationLoading() }
 
             recError != null -> item {
                 MessageCard(
@@ -125,14 +131,28 @@ fun HomeScreen(
             }
 
             else -> item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(recommendations, key = { it.id }) { card ->
-                        RecommendationCard(
-                            card = card,
-                            onClick = { onOpenModel(card.id) },
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (recLoading) {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .clip(CircleShape),
                         )
+                    }
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(
+                            items = recommendations,
+                            key = { it.id },
+                            contentType = { "recommendation" },
+                        ) { card ->
+                            RecommendationCard(
+                                card = card,
+                                onClick = { onOpenModel(card.id) },
+                            )
+                        }
                     }
                 }
             }
@@ -164,21 +184,25 @@ private fun BrandHeader() {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BrandMark()
+        BrandMark(size = 46.dp)
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(text = "Mmodel", style = MaterialTheme.typography.headlineSmall)
             Text(
-                text = "MOBILE MODEL",
+                text = "LOCAL AI · ANDROID",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 1.4.sp,
+                letterSpacing = 1.6.sp,
             )
         }
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.primary,
+            border = BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+            ),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -202,42 +226,62 @@ private fun HeroCard(device: DeviceSpecs, onExplore: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.extraLarge)
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer,
-                        MaterialTheme.colorScheme.secondaryContainer,
-                    ),
-                ),
-            ),
+            .background(BrandGradient)
+            .drawBehind {
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.065f),
+                    radius = size.width * 0.62f,
+                    center = Offset(size.width * 0.94f, size.height * 0.04f),
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.035f),
+                    radius = size.width * 0.45f,
+                    center = Offset(size.width * 0.06f, size.height * 0.95f),
+                )
+            },
     ) {
         Column(
             modifier = Modifier.padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF7DEBDF)),
+                )
+                Text(
+                    text = "DEVICE READY",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.64f),
+                    letterSpacing = 1.8.sp,
+                )
+            }
             Text(
-                text = "DEVICE READY",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.65f),
-                letterSpacing = 1.6.sp,
-            )
-            Text(
-                text = "Local AI that fits your phone.",
+                text = "Local AI that fits\nyour phone.",
                 style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = Color.White,
             )
             Text(
                 text = device.displayName,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                color = Color.White.copy(alpha = 0.7f),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                InfoPill(text = "${formatBytes(device.totalRamBytes)} RAM")
-                InfoPill(text = "${formatBytes(device.freeStorageBytes)} free")
+                HeroPill(text = "${formatBytes(device.totalRamBytes)} RAM")
+                HeroPill(text = "${formatBytes(device.freeStorageBytes)} free")
             }
             Button(
                 onClick = onExplore,
                 shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color(0xFF17123B),
+                ),
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
             ) {
                 Text(text = "Explore models")
@@ -253,11 +297,11 @@ private fun HeroCard(device: DeviceSpecs, onExplore: () -> Unit) {
 }
 
 @Composable
-private fun InfoPill(text: String) {
+private fun HeroPill(text: String) {
     Surface(
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        color = Color.White.copy(alpha = 0.12f),
+        contentColor = Color.White,
     ) {
         Text(
             text = text,
@@ -270,56 +314,92 @@ private fun InfoPill(text: String) {
 
 @Composable
 private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
-    ElevatedCard(
+    Surface(
         onClick = onClick,
         modifier = Modifier
-            .width(272.dp)
-            .heightIn(min = 192.dp),
+            .width(286.dp)
+            .heightIn(min = 196.dp),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        tonalElevation = 0.dp,
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.secondary,
+                            ),
+                        ),
+                    ),
+            )
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-                LetterAvatar(name = card.name, size = 44.dp)
-                Spacer(Modifier.weight(1f))
-                FitBadge(fit = card.fit.fit)
-            }
-            Text(
-                text = card.name,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = card.author.ifBlank { "Hugging Face" },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                MetaItem(
-                    icon = Icons.Rounded.Download,
-                    text = formatBytes(card.downloadBytes),
-                )
-                if (card.parameters != null) {
-                    MetaItem(
-                        icon = Icons.Rounded.Memory,
-                        text = formatParams(card.parameters),
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    LetterAvatar(name = card.name, size = 46.dp)
+                    Spacer(Modifier.weight(1f))
+                    FitBadge(fit = card.fit.fit)
                 }
-            }
-            card.fit.estimatedRamBytes?.let {
                 Text(
-                    text = "Needs about ${formatBytes(it)} RAM",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    text = card.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                Text(
+                    text = card.author.ifBlank { "Hugging Face" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    MetaItem(
+                        icon = Icons.Rounded.Download,
+                        text = formatBytes(card.downloadBytes),
+                    )
+                    if (card.parameters != null) {
+                        MetaItem(
+                            icon = Icons.Rounded.Memory,
+                            text = formatParams(card.parameters),
+                        )
+                    }
+                }
+                card.fit.estimatedRamBytes?.let {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Memory,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                            )
+                            Text(
+                                text = "~${formatBytes(it)} RAM",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -346,9 +426,11 @@ private fun DeviceCard(device: DeviceSpecs) {
         0f
     }
 
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -358,11 +440,20 @@ private fun DeviceCard(device: DeviceSpecs) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Smartphone,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+                Surface(
+                    modifier = Modifier.size(38.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.Smartphone,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
                 Column {
                     Text(
                         text = "${formatBytes(device.totalRamBytes)} RAM",
@@ -383,7 +474,7 @@ private fun DeviceCard(device: DeviceSpecs) {
                     .height(8.dp)
                     .clip(CircleShape),
                 color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -432,8 +523,9 @@ private fun HowItWorksCard(device: DeviceSpecs) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -443,17 +535,26 @@ private fun HowItWorksCard(device: DeviceSpecs) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                )
+                Surface(
+                    modifier = Modifier.size(32.dp),
+                    shape = RoundedCornerShape(11.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp),
+                        )
+                    }
+                }
                 Text(text = "How fit is estimated", style = MaterialTheme.typography.titleMedium)
             }
             Text(
                 text = "Mmodel reads the actual GGUF sizes published by a repo, sums multi-shard quants, and compares the smallest option with a safe RAM budget of ${formatBytes(device.inferenceBudgetBytes)}. Downloaded models can then run locally through llama.cpp.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = "A guide, not a benchmark.",

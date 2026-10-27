@@ -30,6 +30,15 @@ data class HfConfig(
 data class HfSibling(
     val rfilename: String = "",
     val size: Long? = null,
+    val lfs: HfLfs? = null,
+) {
+    /** Some gated/Xet repos expose the real size under `lfs` only. */
+    val byteSize: Long? get() = size?.takeIf { it > 0L } ?: lfs?.size?.takeIf { it > 0L }
+}
+
+@Serializable
+data class HfLfs(
+    val size: Long? = null,
 )
 
 @Serializable

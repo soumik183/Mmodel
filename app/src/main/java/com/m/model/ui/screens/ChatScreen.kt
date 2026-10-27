@@ -1,5 +1,6 @@
 package com.m.model.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,7 +39,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -174,7 +174,11 @@ fun ChatScreen(
                             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            items(state.messages, key = { it.id }) { message ->
+                            items(
+                                items = state.messages,
+                                key = { it.id },
+                                contentType = { "message" },
+                            ) { message ->
                                 ChatBubble(message = message)
                             }
                             item { Spacer(Modifier.height(4.dp)) }
@@ -428,7 +432,11 @@ private fun EmptyChat(
                     subtitle = "Tap one to load it into RAM",
                 )
             }
-            items(downloaded, key = { it.id }) { record ->
+            items(
+                items = downloaded,
+                key = { it.id },
+                contentType = { "download" },
+            ) { record ->
                 DownloadedModelRow(
                     record = record,
                     device = device,
@@ -466,10 +474,14 @@ private fun DownloadedModelRow(
     val fit = remember(record.totalBytes, device.inferenceBudgetBytes) {
         ModelFit.ramFit(record.totalBytes, device)
     }
-    ElevatedCard(
+    Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        tonalElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
@@ -551,9 +563,15 @@ private fun LoadModelPane(
                 }
             }
         } else {
-            ElevatedCard(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                ),
             ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
@@ -712,10 +730,14 @@ private fun WelcomePane(
 
 @Composable
 private fun Suggestion(text: String, onClick: (String) -> Unit) {
-    ElevatedCard(
+    Surface(
         onClick = { onClick(text) },
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        tonalElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

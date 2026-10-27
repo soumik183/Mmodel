@@ -137,6 +137,76 @@ class ModelFitTest {
         assertEquals(Fit.UNKNOWN, card.fit.fit)
     }
 
+    @Test
+    fun lfsSizeIsUsedWhenTopLevelSizeIsMissing() {
+        val card = ModelFit.analyze(
+            HfModel(
+                id = "org/model",
+                siblings = listOf(
+                    HfSibling(
+                        rfilename = "model-Q4_K_M.gguf",
+                        lfs = HfLfs(size = 3_000_000_000L),
+                    ),
+                ),
+            ),
+            device,
+        )
+
+        assertEquals(3_000_000_000L, card.downloadBytes)
+        assertEquals(Fit.SLOW, card.fit.fit)
+    }
+
+    @Test
+    fun unsizedGgufStillOffersAFileToDownload() {
+        val card = ModelFit.analyze(
+            HfModel(
+                id = "org/model",
+                siblings = listOf(HfSibling(rfilename = "model-Q4_K_M.gguf")),
+            ),
+            device,
+        )
+
+        assertEquals(1, card.ggufVariants)
+        assertEquals(1, card.variants.size)
+        assertEquals(0L, card.variants.single().bytes)
+        assertEquals(Fit.UNKNOWN, card.fit.fit)
+    }
+
+    @Test
+    fun partialShardSizesAreTreatedAsUnknown() {
+        val card = ModelFit.analyze(
+            HfModel(
+                id = "org/model",
+                siblings = listOf(
+                    HfSibling(rfilename = "model-Q4_K_M-00001-of-00002.gguf", size = 800_000_000L),
+                    HfSibling(rfilename = "model-Q4_K_M-00002-of-00002.gguf"),
+                ),
+            ),
+            device,
+        )
+
+        assertEquals(0L, card.variants.single().bytes)
+        assertEquals(Fit.UNKNOWN, card.fit.fit)
+    }
+
+    @Test
+    fun unsizedVariantDoesNotReplaceTheBestSizedVariant() {
+        val card = ModelFit.analyze(
+            HfModel(
+                id = "org/model",
+                siblings = listOf(
+                    HfSibling(rfilename = "model-Q2_K.gguf", size = 800_000_000L),
+                    HfSibling(rfilename = "model-Q4_K_M.gguf"),
+                ),
+            ),
+            device,
+        )
+
+        assertEquals(800_000_000L, card.downloadBytes)
+        assertEquals("Q2_K", card.bestVariant?.quant)
+        assertEquals(0L, card.variants.last().bytes)
+    }
+
     private fun model(vararg files: Pair<String, Long>): HfModel = HfModel(
         id = "org/model",
         author = "org",

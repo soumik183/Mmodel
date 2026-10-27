@@ -1,5 +1,6 @@
 package com.m.model.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
@@ -26,13 +29,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,7 +63,7 @@ fun BrowseScreen(
     Column(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -66,21 +71,35 @@ fun BrowseScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Explore models",
+                        text = "Explore",
                         style = MaterialTheme.typography.headlineSmall,
                     )
                     Text(
-                        text = "Search the Hugging Face catalog",
+                        text = when {
+                            state.loading && state.items.isEmpty() -> "Reading the Hugging Face catalog…"
+                            state.items.isEmpty() -> "Search the Hugging Face catalog"
+                            else -> "${state.items.size} models · Hugging Face catalog"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                IconButton(onClick = vm::refreshBrowse) {
-                    Icon(
-                        imageVector = Icons.Rounded.Refresh,
-                        contentDescription = "Reload models",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                    ),
+                ) {
+                    IconButton(onClick = vm::refreshBrowse) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Reload models",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
 
@@ -88,7 +107,12 @@ fun BrowseScreen(
                 value = state.query,
                 onValueChange = vm::onQueryChange,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search models, authors, tasks…") },
+                placeholder = {
+                    Text(
+                        text = "Search models, authors, tasks…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Rounded.Search,
@@ -107,7 +131,14 @@ fun BrowseScreen(
                     }
                 },
                 singleLine = true,
-                shape = MaterialTheme.shapes.large,
+                shape = RoundedCornerShape(20.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                ),
             )
 
             Row(
@@ -118,21 +149,44 @@ fun BrowseScreen(
                     selected = state.ggufOnly,
                     onClick = { vm.setGgufOnly(!state.ggufOnly) },
                     label = { Text("GGUF only") },
+                    shape = CircleShape,
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
                 )
                 Spacer(Modifier.weight(1f))
                 Box {
-                    TextButton(onClick = { sortMenuOpen = true }) {
-                        Icon(
-                            imageVector = Icons.Rounded.Tune,
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(text = state.sort.label)
-                        Icon(
-                            imageVector = Icons.Rounded.ArrowDropDown,
-                            contentDescription = null,
-                        )
+                    Surface(
+                        onClick = { sortMenuOpen = true },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .height(36.dp)
+                                .padding(start = 12.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Tune,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(text = state.sort.label, style = MaterialTheme.typography.labelMedium)
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowDropDown,
+                                contentDescription = null,
+                            )
+                        }
                     }
                     DropdownMenu(
                         expanded = sortMenuOpen,
@@ -164,7 +218,8 @@ fun BrowseScreen(
             LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(3.dp),
+                    .padding(top = 10.dp)
+                    .height(2.dp),
             )
         }
 
@@ -221,12 +276,12 @@ fun BrowseScreen(
                         start = 20.dp,
                         end = 20.dp,
                         top = 14.dp,
-                        bottom = 28.dp,
+                        bottom = 24.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     if (state.error != null) {
-                        item {
+                        item(contentType = "notice") {
                             MessageCard(
                                 icon = Icons.Rounded.CloudOff,
                                 title = "Refresh failed",
@@ -236,7 +291,11 @@ fun BrowseScreen(
                             )
                         }
                     }
-                    items(state.items, key = { it.id }) { card ->
+                    items(
+                        items = state.items,
+                        key = { it.id },
+                        contentType = { "model" },
+                    ) { card ->
                         ModelRow(card = card, onClick = { onOpenModel(card.id) })
                     }
                 }
