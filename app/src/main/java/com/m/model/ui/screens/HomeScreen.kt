@@ -117,10 +117,10 @@ fun HomeScreen(
             recommendations.isEmpty() -> item {
                 MessageCard(
                     icon = Icons.Rounded.AutoAwesome,
-                    title = "No fitting models yet",
-                    message = "Your phone's RAM budget did not match the current GGUF list. Try refreshing in a moment.",
-                    actionLabel = "Refresh",
-                    onAction = vm::refreshRecommendations,
+                    title = "No fitting chat model found",
+                    message = "No sized, chat-ready GGUF in the current picks fits this phone. Browse the full catalog to choose a smaller quantization.",
+                    actionLabel = "Explore models",
+                    onAction = onExplore,
                 )
             }
 

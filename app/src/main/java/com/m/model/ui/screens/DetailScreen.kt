@@ -37,6 +37,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -57,6 +58,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.m.model.data.DeviceSpecs
@@ -74,6 +77,7 @@ import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.SectionHeader
 import com.m.model.ui.components.fitColors
 import com.m.model.ui.components.fitIcon
+import com.m.model.ui.components.fitLabel
 import com.m.model.ui.formatBytes
 import com.m.model.ui.formatContext
 import com.m.model.ui.formatCount
@@ -267,6 +271,7 @@ private fun DetailContent(
         }
 
         item { FitCard(card = card, device = device) }
+        item { ComparisonCard(card = card, device = device, onRefresh = onRefreshDevice) }
 
         item {
             SectionHeader(
@@ -351,7 +356,7 @@ private fun DetailContent(
 
         item {
             Text(
-                text = "Fit uses actual Hugging Face file sizes and this phone's live memory and storage. RAM is estimated at 1.15× the quant size plus 600 MB overhead, compared with a safe budget of 75% of total RAM minus 1.5 GB. Context size, runtime and background apps can change the result.",
+                text = "Fit uses actual Hugging Face file sizes and this phone's live memory and storage. RAM is estimated at 1.15× the quant size plus 600 MB overhead, compared with a safe budget of min(75% of total RAM, total RAM − 1.5 GB). Context size, runtime and background apps can change the result.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -751,6 +756,219 @@ private fun FitCard(card: ModelCard, device: DeviceSpecs) {
                 Text(
                     text = "Free up space or choose a smaller quantization.",
                     style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -> Unit) {
+    val bestVariant = card.bestVariant
+    val downloadBytes = card.downloadBytes
+    val needsRam = card.fit.estimatedRamBytes
+    val memoryFit = ModelFit.memoryFit(needsRam, device.inferenceBudgetBytes)
+    val storageFits = ModelFit.storageFits(downloadBytes, device.freeStorageBytes)
+    val storageFit = when (storageFits) {
+        true -> Fit.WORKS
+        false -> Fit.WONT_RUN
+        null -> Fit.UNKNOWN
+    }
+    val singleFile = card.variants.any { !it.sharded }
+    val runtimeFit = when {
+        !device.canRunLocalChat -> Fit.WONT_RUN
+        card.variants.isEmpty() -> Fit.WONT_RUN
+        singleFile -> Fit.WORKS
+        else -> Fit.WONT_RUN
+    }
+    val freeAfter = downloadBytes?.let { device.freeStorageBytes - it }
+    val shortfall = downloadBytes?.let {
+        (it + ModelFit.STORAGE_RESERVE_BYTES - device.freeStorageBytes).coerceAtLeast(0L)
+    }
+    val storageDetail = when (storageFits) {
+        true -> freeAfter?.let {
+            "${formatBytes(it)} after · ${ModelFit.STORAGE_RESERVE_BYTES / 1_000_000} MB reserve"
+        } ?: "Free space checked"
+        false -> shortfall?.takeIf { it > 0L }?.let {
+            "Short by ${formatBytes(it)} incl. reserve"
+        } ?: "Not enough free space"
+        null -> "Size not published"
+    }
+    val modelContext = (card.model.gguf?.contextLength
+        ?: card.model.config?.maxPositionEmbeddings)?.takeIf { it > 0L }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text("Model vs your phone", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "The exact values behind the fit verdict",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Recheck")
+                }
+            }
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "MODEL NEEDS",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(40.dp))
+                Text(
+                    text = "YOUR PHONE",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.End,
+                )
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ComparisonRow(
+                label = "Memory",
+                modelPrimary = needsRam?.let { "${formatBytes(it)} RAM" } ?: "Unknown",
+                modelSecondary = if (needsRam != null) "Estimated at load" else "No file size published",
+                devicePrimary = "${formatBytes(device.inferenceBudgetBytes)} safe",
+                deviceSecondary = "of ${formatBytes(device.totalRamBytes)} physical RAM",
+                status = memoryFit,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ComparisonRow(
+                label = "Download",
+                modelPrimary = formatBytes(downloadBytes),
+                modelSecondary = bestVariant?.let {
+                    if (it.sharded) "${it.quant} · ${it.fileCount} shards" else "${it.quant} · single file"
+                } ?: "No GGUF file",
+                devicePrimary = "${formatBytes(device.freeStorageBytes)} free",
+                deviceSecondary = storageDetail,
+                status = storageFit,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ComparisonRow(
+                label = "Local chat",
+                modelPrimary = when {
+                    card.variants.isEmpty() -> "No GGUF file"
+                    singleFile -> "Single-file GGUF"
+                    else -> "Multi-shard GGUF"
+                },
+                modelSecondary = when {
+                    card.variants.isEmpty() -> "Chat needs GGUF weights"
+                    singleFile -> "At least one quant is chat-ready"
+                    else -> "Chat cannot load shards"
+                },
+                devicePrimary = if (device.canRunLocalChat) "arm64 ready" else "${device.abi} only",
+                deviceSecondary = "llama.cpp runtime",
+                status = runtimeFit,
+            )
+
+            if (modelContext != null) {
+                Text(
+                    text = "Model context: ${formatContext(modelContext)}. Mmodel caps local chat at 2K tokens to protect memory.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "Memory = 1.15× GGUF size + 600 MB overhead. Safe budget = min(75% of RAM, RAM − 1.5 GB). Download check reserves ${ModelFit.STORAGE_RESERVE_BYTES / 1_000_000} MB for Android.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComparisonRow(
+    label: String,
+    modelPrimary: String,
+    modelSecondary: String,
+    devicePrimary: String,
+    deviceSecondary: String,
+    status: Fit,
+) {
+    val (background, content) = fitColors(status)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = modelPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = modelSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Surface(
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .size(28.dp),
+                shape = CircleShape,
+                color = background,
+                contentColor = content,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = fitIcon(status),
+                        contentDescription = "$label: ${fitLabel(status)}",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = devicePrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.End,
+                )
+                Text(
+                    text = deviceSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.End,
                 )
             }
         }

@@ -42,7 +42,19 @@ data class ModelCard(
 
 object ModelFit {
     private const val MB = 1_000_000L
-    private const val RESERVED_STORAGE = 300L * MB
+    const val STORAGE_RESERVE_BYTES = 300_000_000L
+    private val AUXILIARY_GGUF = listOf(
+        "mmproj",
+        "projector",
+        "lora",
+        "imatrix",
+        "importance",
+        "mtp",
+        "tokenizer",
+        "vae",
+        "clip",
+        "encoder",
+    )
 
     private val shardPattern =
         Regex("""^(.*)-(\d{5})-of-(\d{5})\.gguf$""", RegexOption.IGNORE_CASE)
@@ -60,7 +72,7 @@ object ModelFit {
 
         val parameters = model.gguf?.total?.takeIf { it > 0 }
             ?: model.safetensors?.total?.takeIf { it > 0 }
-            ?: model.safetensors?.parameters?.values?.maxOrNull()?.takeIf { it > 0 }
+            ?: model.safetensors?.parameters?.values?.sum()?.takeIf { it > 0 }
 
         val fit = best?.fit ?: fitFor(downloadBytes, device, isGguf = false)
 
@@ -84,18 +96,29 @@ object ModelFit {
 
         val needsRam = estimateRamBytes(fileBytes, isGguf)
         val budget = device.inferenceBudgetBytes
-        val storageBlocked = fileBytes + RESERVED_STORAGE > device.freeStorageBytes
+        val storageBlocked = storageFits(fileBytes, device.freeStorageBytes) == false
         val ratio = if (budget > 0L) needsRam.toFloat() / budget else 0f
+        val fit = if (storageBlocked) Fit.WONT_RUN else memoryFit(needsRam, budget)
 
-        val fit = when {
-            storageBlocked -> Fit.WONT_RUN
-            budget <= 0L -> Fit.WONT_RUN
+        return FitResult(fit, needsRam, ratio, storageBlocked)
+    }
+
+    /** The memory part of the verdict, independent of download space. */
+    fun memoryFit(estimatedRamBytes: Long?, budgetBytes: Long): Fit {
+        if (estimatedRamBytes == null || estimatedRamBytes <= 0L) return Fit.UNKNOWN
+        if (budgetBytes <= 0L) return Fit.WONT_RUN
+        val ratio = estimatedRamBytes.toFloat() / budgetBytes
+        return when {
             ratio <= 0.65f -> Fit.WORKS
             ratio <= 1f -> Fit.SLOW
             else -> Fit.WONT_RUN
         }
+    }
 
-        return FitResult(fit, needsRam, ratio, storageBlocked)
+    /** The storage part of the verdict, independent of memory. */
+    fun storageFits(fileBytes: Long?, freeStorageBytes: Long): Boolean? {
+        if (fileBytes == null || fileBytes <= 0L) return null
+        return fileBytes + STORAGE_RESERVE_BYTES <= freeStorageBytes
     }
 
     /**
@@ -109,12 +132,7 @@ object ModelFit {
         val needsRam = estimateRamBytes(fileBytes, isGguf = true)
         val budget = device.inferenceBudgetBytes
         val ratio = if (budget > 0L) needsRam.toFloat() / budget else 0f
-        val fit = when {
-            budget <= 0L -> Fit.WONT_RUN
-            ratio <= 0.65f -> Fit.WORKS
-            ratio <= 1f -> Fit.SLOW
-            else -> Fit.WONT_RUN
-        }
+        val fit = memoryFit(needsRam, budget)
         return FitResult(fit, needsRam, ratio)
     }
 
@@ -148,11 +166,8 @@ object ModelFit {
             if (!name.endsWith(".gguf", ignoreCase = true)) return@forEach
 
             val lowerName = name.lowercase()
-            // Projector files and adapters are not the model itself.
-            if (lowerName.contains("mmproj") ||
-                lowerName.contains("projector") ||
-                lowerName.contains("lora")
-            ) {
+            // Projectors, adapters, importance matrices and MTP helpers are not the model.
+            if (AUXILIARY_GGUF.any { lowerName.contains(it) }) {
                 return@forEach
             }
 

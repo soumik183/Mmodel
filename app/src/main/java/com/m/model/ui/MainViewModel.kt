@@ -23,6 +23,9 @@ import com.m.model.data.ModelFit
 import com.m.model.data.ModelSort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +33,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -210,8 +214,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val models = api.listModels(query, sort, ggufOnly)
                 val cards = models.map { analyze(it) }
-                cache.putAll(cards.associateBy { it.id })
                 browse = browse.copy(items = cards, loading = false, error = null)
+
+                // Search responses omit file sizes. Enrich a few leading cards so they
+                // show a real fit without opening each model.
+                val unknown = cards.filter { it.downloadBytes == null }.take(8)
+                if (unknown.isNotEmpty()) {
+                    val detailed = hydrate(unknown.map { it.id }, 8)
+                    if (detailed.isNotEmpty()) {
+                        val byId = detailed.associateBy { it.id }
+                        cache.putAll(byId)
+                        browse = browse.copy(items = browse.items.map { byId[it.id] ?: it })
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -229,21 +244,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     query = "",
                     sort = ModelSort.TRENDING,
                     ggufOnly = true,
-                    limit = 80,
+                    limit = 100,
+                    withGguf = true,
                 )
-                val cards = models.map { analyze(it) }
-                cache.putAll(cards.associateBy { it.id })
+                val candidates = models
+                    .filter { model ->
+                        val gguf = model.gguf
+                        val total = gguf?.total ?: 0L
+                        gguf != null &&
+                            !gguf.chatTemplate.isNullOrBlank() &&
+                            total > 0L &&
+                            total / 1_000_000_000.0 <= maxCandidateParams() &&
+                            (model.pipelineTag == null || isChatPipeline(model.pipelineTag))
+                    }
+                    .map { analyze(it) }
+                    .sortedByDescending { score(it) }
+                    .take(24)
 
-                val fitting = cards.filter {
-                    it.fit.fit == Fit.WORKS || it.fit.fit == Fit.SLOW
-                }
-                recommendations = fitting
+                val detailed = hydrate(candidates.map { it.id }, 24)
+                cache.putAll(detailed.associateBy { it.id })
+                recommendations = detailed
+                    .filter { !it.model.gguf?.chatTemplate.isNullOrBlank() }
+                    .filter { it.fit.fit == Fit.WORKS || it.fit.fit == Fit.SLOW }
                     .sortedByDescending { score(it) }
                     .take(12)
-
-                if (recommendations.isEmpty()) {
-                    recError = "No sized GGUF models were found. Try refreshing."
-                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -254,12 +278,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun hydrate(ids: List<String>, limit: Int): List<ModelCard> =
+        withTimeoutOrNull(25_000L) {
+            coroutineScope {
+                ids.distinct().take(limit).map { id ->
+                    async {
+                        try {
+                            analyze(api.getModel(id))
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                }.awaitAll().filterNotNull()
+            }
+        } ?: emptyList()
+
+    private fun maxCandidateParams(): Double {
+        val budgetGb = device.inferenceBudgetBytes / 1_000_000_000.0
+        return ((budgetGb - 0.4) / 0.3).coerceIn(1.0, 80.0)
+    }
+
+    private fun isChatPipeline(tag: String): Boolean = when (tag.lowercase()) {
+        "text-generation", "image-text-to-text", "text2text-generation", "conversational" -> true
+        else -> false
+    }
+
     fun openModel(id: String) {
         if (id.isBlank()) return
 
-        val cached = cache[id]
+        val cached = cache[id]?.takeIf { it.downloadBytes != null }
         if (detail.id == id && (cached != null || detail.loading)) {
-            if (cached != null && detail.card == null) {
+            if (cached != null && detail.card?.downloadBytes == null) {
                 detail = DetailState(id = id, card = cached)
             }
             return
@@ -280,7 +331,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 if (detail.id == id) {
-                    detail = DetailState(id = id, error = friendlyError(e))
+                    val fallback = cache[id]
+                    detail = if (fallback != null) {
+                        DetailState(id = id, card = fallback)
+                    } else {
+                        DetailState(id = id, error = friendlyError(e))
+                    }
                 }
             }
         }
@@ -544,7 +600,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             val trimmed = ChatPrompt.trimHistory(
                 history,
-                maxChars = (contextLength * 3).coerceIn(1_200, 6_000),
+                maxChars = (contextLength * 2).coerceIn(800, 6_000),
             )
             val system = ChatPrompt.DEFAULT_SYSTEM
             val modelKey = record.modelId + " " + record.architecture.orEmpty()
@@ -558,7 +614,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
-                val result = engine.generate(prompt, maxTokens = 512) { token ->
+                val result = engine.generate(
+                    prompt,
+                    maxTokens = (contextLength / 2).coerceIn(128, 512),
+                ) { token ->
                     if (generationId != generation) return@generate
                     _chat.update { current ->
                         if (current.recordId != record.id) {
@@ -681,8 +740,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun unloadChat() {
         generationId++
         chatLoadEpoch++
-        _chat.update {
-            it.copy(
+        _chat.update { state ->
+            state.copy(
+                messages = state.messages
+                    .filterNot { it.streaming && it.text.isBlank() }
+                    .map { if (it.streaming) it.copy(streaming = false) else it },
                 loadingModel = false,
                 ready = false,
                 generating = false,

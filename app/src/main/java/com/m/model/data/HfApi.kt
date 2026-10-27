@@ -31,6 +31,7 @@ class HfApi(
         sort: ModelSort,
         ggufOnly: Boolean,
         limit: Int = 50,
+        withGguf: Boolean = false,
     ): List<HfModel> = withContext(Dispatchers.IO) {
         val url = base.newBuilder()
             .addQueryParameter("limit", limit.toString())
@@ -41,6 +42,7 @@ class HfApi(
             .apply {
                 if (query.isNotBlank()) addQueryParameter("search", query.trim())
                 if (ggufOnly) addQueryParameter("filter", "gguf")
+                if (withGguf) addQueryParameter("expand", "gguf")
             }
             .build()
 
@@ -60,7 +62,7 @@ class HfApi(
     private fun fetch(url: String): String {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mmodel/1.0 (Android)")
+            .header("User-Agent", "Mmodel/1.2 (Android)")
             .build()
 
         client.newCall(request).execute().use { response ->

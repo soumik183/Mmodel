@@ -42,7 +42,10 @@ data class DeviceSpecs(
             val activityManager =
                 context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val memory = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
-            val storage = StatFs(context.filesDir.absolutePath)
+            // Models live in app-specific external storage; use that volume's free space.
+            val storageRoot = context.getExternalFilesDir(null) ?: context.filesDir
+            val storage = runCatching { StatFs(storageRoot.absolutePath) }.getOrNull()
+                ?: runCatching { StatFs(context.filesDir.absolutePath) }.getOrNull()
 
             val soc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 listOf(Build.SOC_MANUFACTURER, Build.SOC_MODEL)
@@ -64,8 +67,8 @@ data class DeviceSpecs(
                     .ifBlank { "unknown" },
                 totalRamBytes = memory.totalMem,
                 availableRamBytes = memory.availMem,
-                freeStorageBytes = storage.availableBytes,
-                totalStorageBytes = storage.totalBytes,
+                freeStorageBytes = storage?.availableBytes ?: 0L,
+                totalStorageBytes = storage?.totalBytes ?: 0L,
                 supportedAbis = Build.SUPPORTED_ABIS.toList(),
             )
         }

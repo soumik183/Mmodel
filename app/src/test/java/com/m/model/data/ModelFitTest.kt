@@ -103,6 +103,34 @@ class ModelFitTest {
     }
 
     @Test
+    fun auxiliaryGgufFilesAreIgnored() {
+        val card = ModelFit.analyze(
+            model(
+                "model-Q4_K_M.gguf" to 2_000_000_000L,
+                "imatrix_unsloth.gguf" to 13_000_000L,
+                "MTP/mtp-model-Q4_0.gguf" to 800_000_000L,
+                "tokenizer.gguf" to 1_000_000L,
+            ),
+            device,
+        )
+
+        assertEquals(2_000_000_000L, card.downloadBytes)
+        assertEquals(1, card.ggufVariants)
+    }
+
+    @Test
+    fun memoryAndStorageVerdictsAreIndependent() {
+        assertEquals(Fit.WORKS, ModelFit.memoryFit(1_000_000_000L, 2_000_000_000L))
+        assertEquals(Fit.SLOW, ModelFit.memoryFit(1_500_000_000L, 2_000_000_000L))
+        assertEquals(Fit.WONT_RUN, ModelFit.memoryFit(2_100_000_000L, 2_000_000_000L))
+        assertEquals(Fit.UNKNOWN, ModelFit.memoryFit(null, 2_000_000_000L))
+
+        assertEquals(true, ModelFit.storageFits(1_000_000_000L, 1_300_000_000L))
+        assertEquals(false, ModelFit.storageFits(1_000_000_000L, 1_299_999_999L))
+        assertEquals(null, ModelFit.storageFits(null, 1_300_000_000L))
+    }
+
+    @Test
     fun unknownWhenNoWeightsArePublished() {
         val card = ModelFit.analyze(HfModel(id = "org/no-weights"), device)
 

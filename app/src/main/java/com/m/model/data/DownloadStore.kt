@@ -4,10 +4,12 @@ import android.content.Context
 import android.os.StatFs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +20,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -125,8 +128,10 @@ class DownloadStore(context: Context) {
         .retryOnConnectionFailure(true)
         .build()
 
+    private val activeLock = Any()
     private var activeJob: Job? = null
     private var activeRecordId: String? = null
+    private var activeCall: Call? = null
 
     init {
         runCatching { modelsRoot.mkdirs() }
@@ -138,9 +143,8 @@ class DownloadStore(context: Context) {
     }.getOrDefault(0L)
 
     fun startNew(record: DownloadRecord, scope: CoroutineScope): String? {
-        if (activeJob?.isActive == true) {
-            return "Another download is already running."
-        }
+        val busy = synchronized(activeLock) { activeJob != null }
+        if (busy) return "Another download is already running."
         if (record.files.isEmpty()) return "This model has no downloadable files."
 
         _records.update { current ->
@@ -151,53 +155,76 @@ class DownloadStore(context: Context) {
     }
 
     fun start(recordId: String, scope: CoroutineScope): String? {
-        if (activeJob?.isActive == true) {
-            return if (activeRecordId == recordId) null
-            else "Another download is already running."
-        }
-
-        val current = _records.value.firstOrNull { it.id == recordId }
-            ?: return "Download not found."
-        if (current.isComplete) {
-            markStatus(recordId, DownloadStatus.DONE, null)
-            return null
-        }
-
-        _records.update { list ->
-            list.map { record ->
-                if (record.id == recordId) {
-                    record.copy(status = DownloadStatus.DOWNLOADING, error = null)
-                } else {
-                    record
+        lateinit var job: Job
+        synchronized(activeLock) {
+            val running = activeJob
+            if (running != null) {
+                return when {
+                    activeRecordId != recordId -> "Another download is already running."
+                    running.isActive -> null
+                    else -> "The previous download is still stopping. Tap Resume again in a moment."
                 }
             }
-        }
-        persist()
 
-        activeRecordId = recordId
-        activeJob = scope.launch(Dispatchers.IO) {
-            try {
-                runDownload(recordId)
-            } finally {
-                if (activeRecordId == recordId) {
-                    activeRecordId = null
-                    activeJob = null
+            val current = _records.value.firstOrNull { it.id == recordId }
+                ?: return "Download not found."
+            if (current.isComplete) {
+                markStatus(recordId, DownloadStatus.DONE, null)
+                return null
+            }
+
+            _records.update { list ->
+                list.map { record ->
+                    if (record.id == recordId) {
+                        record.copy(status = DownloadStatus.DOWNLOADING, error = null)
+                    } else {
+                        record
+                    }
                 }
             }
+            persist()
+
+            job = scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+                try {
+                    runDownload(recordId)
+                } finally {
+                    synchronized(activeLock) {
+                        if (activeJob === job) {
+                            activeRecordId = null
+                            activeCall = null
+                            activeJob = null
+                        }
+                    }
+                }
+            }
+            activeRecordId = recordId
+            activeJob = job
         }
+        job.start()
         return null
     }
 
     fun pause(recordId: String) {
-        if (activeRecordId == recordId) {
-            activeJob?.cancel()
+        synchronized(activeLock) {
+            if (activeRecordId == recordId) {
+                activeCall?.cancel()
+                activeJob?.cancel()
+            }
         }
         markStatus(recordId, DownloadStatus.PAUSED, null)
     }
 
     fun delete(recordId: String, scope: CoroutineScope) {
         scope.launch(Dispatchers.IO) {
-            val job = if (activeRecordId == recordId) activeJob else null
+            val job = synchronized(activeLock) {
+                if (activeRecordId == recordId) {
+                    activeCall?.cancel()
+                    activeJob?.cancel()
+                    activeJob
+                } else {
+                    null
+                }
+            }
             job?.cancelAndJoin()
 
             val record = _records.value.firstOrNull { it.id == recordId } ?: return@launch
@@ -213,11 +240,13 @@ class DownloadStore(context: Context) {
     }
 
     fun pauseActive() {
-        val id = activeRecordId ?: return
-        activeJob?.cancel()
+        val id = synchronized(activeLock) {
+            val current = activeRecordId ?: return
+            activeCall?.cancel()
+            activeJob?.cancel()
+            current
+        }
         markStatus(id, DownloadStatus.PAUSED, "Download was interrupted. Tap Resume.")
-        activeRecordId = null
-        activeJob = null
     }
 
     private suspend fun runDownload(recordId: String) {
@@ -232,10 +261,23 @@ class DownloadStore(context: Context) {
                 downloadFile(recordId, index)
             }
         } catch (e: CancellationException) {
-            markStatus(recordId, DownloadStatus.PAUSED, null)
+            pauseOrFinish(recordId)
             throw e
         } catch (e: Exception) {
+            if (!currentCoroutineContext().isActive) {
+                pauseOrFinish(recordId)
+                throw CancellationException("Download stopped")
+            }
             markStatus(recordId, DownloadStatus.ERROR, friendlyError(e))
+        }
+    }
+
+    private fun pauseOrFinish(recordId: String) {
+        val complete = _records.value.firstOrNull { it.id == recordId }?.isComplete == true
+        if (complete) {
+            markDone(recordId)
+        } else {
+            markStatus(recordId, DownloadStatus.PAUSED, null)
         }
     }
 
@@ -269,66 +311,80 @@ class DownloadStore(context: Context) {
 
         val requestBuilder = Request.Builder()
             .url(resolveUrl(record.modelId, file.remoteName))
-            .header("User-Agent", "Mmodel/1.1 (Android)")
+            .header("User-Agent", "Mmodel/1.2 (Android)")
+            .header("Accept-Encoding", "identity")
         if (existing > 0 && (file.bytesTotal <= 0L || existing < file.bytesTotal)) {
             requestBuilder.header("Range", "bytes=$existing-")
         }
         val request = requestBuilder.build()
+        val call = client.newCall(request)
+        synchronized(activeLock) {
+            if (activeRecordId != recordId) throw CancellationException("Download stopped")
+            activeCall = call
+            if (activeJob?.isCancelled == true) call.cancel()
+        }
 
-        client.newCall(request).execute().use { response ->
-            if (response.code == 416) {
-                part.delete()
-                throw DownloadFailure("The partial download was stale. Tap Resume to start it again.")
-            }
-            if (!response.isSuccessful) {
-                throw DownloadFailure(httpMessage(response.code))
-            }
+        try {
+            call.execute().use { response ->
+                if (response.code == 416) {
+                    part.delete()
+                    throw DownloadFailure("The partial download was stale. Tap Resume to start it again.")
+                }
+                if (!response.isSuccessful) {
+                    throw DownloadFailure(httpMessage(response.code))
+                }
 
-            val body = response.body ?: throw DownloadFailure("Hugging Face returned an empty file.")
-            val appending = response.code == 206 && existing > 0
-            if (!appending) existing = 0L
+                val body = response.body
+                    ?: throw DownloadFailure("Hugging Face returned an empty file.")
+                val appending = response.code == 206 && existing > 0
+                if (!appending) existing = 0L
 
-            val expected = when {
-                response.code == 206 && body.contentLength() >= 0L ->
-                    existing + body.contentLength()
+                val expected = when {
+                    response.code == 206 && body.contentLength() >= 0L ->
+                        existing + body.contentLength()
 
-                body.contentLength() > 0L -> body.contentLength()
-                file.bytesTotal > 0L -> file.bytesTotal
-                else -> 0L
-            }
+                    body.contentLength() > 0L -> body.contentLength()
+                    file.bytesTotal > 0L -> file.bytesTotal
+                    else -> 0L
+                }
 
-            if (expected > 0L && file.bytesTotal <= 0L) {
-                updateFileTotal(recordId, index, expected)
-            }
+                if (expected > 0L && file.bytesTotal <= 0L) {
+                    updateFileTotal(recordId, index, expected)
+                }
 
-            body.byteStream().use { input ->
-                FileOutputStream(part, appending).use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    var written = existing
-                    var lastUpdate = 0L
+                body.byteStream().use { input ->
+                    FileOutputStream(part, appending).use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var written = existing
+                        var lastUpdate = 0L
 
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        output.write(buffer, 0, read)
-                        written += read
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            written += read
 
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdate >= 100) {
-                            updateProgress(recordId, index, written)
-                            lastUpdate = now
+                            val now = System.currentTimeMillis()
+                            if (now - lastUpdate >= 100) {
+                                updateProgress(recordId, index, written)
+                                lastUpdate = now
+                            }
+                        }
+                        output.fd.sync()
+                        updateProgress(recordId, index, written)
+
+                        if (expected > 0L && written != expected) {
+                            throw DownloadFailure(
+                                "Download incomplete ($written of $expected bytes). Tap Resume to continue.",
+                            )
                         }
                     }
-                    output.fd.sync()
-                    updateProgress(recordId, index, written)
-
-                    if (expected > 0L && written != expected) {
-                        throw DownloadFailure(
-                            "Download incomplete ($written of $expected bytes). Tap Resume to continue.",
-                        )
-                    }
                 }
+            }
+        } finally {
+            synchronized(activeLock) {
+                if (activeCall === call) activeCall = null
             }
         }
 

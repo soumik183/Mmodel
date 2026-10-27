@@ -293,7 +293,7 @@ private fun ChatHeader(
                     )
                 }
 
-                if (state.ready) {
+                if (state.messages.isNotEmpty()) {
                     IconButton(onClick = onClear) {
                         Icon(
                             imageVector = Icons.Rounded.DeleteSweep,
@@ -301,6 +301,8 @@ private fun ChatHeader(
                             modifier = Modifier.size(20.dp),
                         )
                     }
+                }
+                if (state.ready) {
                     IconButton(onClick = onUnload) {
                         Icon(
                             imageVector = Icons.Rounded.PowerSettingsNew,
@@ -710,12 +712,10 @@ private fun WelcomePane(
 
 @Composable
 private fun Suggestion(text: String, onClick: (String) -> Unit) {
-    Surface(
+    ElevatedCard(
         onClick = { onClick(text) },
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

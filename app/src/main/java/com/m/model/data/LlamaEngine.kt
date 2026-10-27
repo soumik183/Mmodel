@@ -154,16 +154,22 @@ class LlamaEngine {
 
     suspend fun format(messages: List<Map<String, Any>>): String? =
         withContext(Dispatchers.IO) {
-            val current = synchronized(lock) { session } ?: return@withContext null
-            runCatching { current.context.getFormattedChat(messages, "") }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
+            operation.withLock {
+                generation.withLock {
+                    val current = synchronized(lock) { session } ?: return@withLock null
+                    runCatching { current.context.getFormattedChat(messages, "") }
+                        .getOrNull()
+                        ?.takeIf { it.isNotBlank() }
+                }
+            }
         }
 
     suspend fun stop() {
-        val current = synchronized(lock) { session } ?: return
         withContext(Dispatchers.IO) {
-            runCatching { current.context.stopCompletion() }
+            operation.withLock {
+                val current = synchronized(lock) { session } ?: return@withLock
+                runCatching { current.context.stopCompletion() }
+            }
         }
     }
 
