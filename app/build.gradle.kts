@@ -13,8 +13,13 @@ android {
         applicationId = "com.m.model"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+
+        ndk {
+            // The llama.cpp runtime ships arm64-v8a only.
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
@@ -42,6 +47,7 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        jniLibs.useLegacyPackaging = false
     }
 }
 
@@ -59,6 +65,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.github.ljcamargo:llamacpp-kotlin:0.2.0") {
+        // The helper only needs core-ktx, which the app already provides.
+        exclude(group = "androidx.core", module = "core-ktx")
+        exclude(group = "androidx.appcompat", module = "appcompat")
+        exclude(group = "com.google.android.material", module = "material")
+    }
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
