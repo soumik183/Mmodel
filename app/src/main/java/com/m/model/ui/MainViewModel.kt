@@ -60,6 +60,7 @@ data class BrowseState(
     val endReached: Boolean = false,
     val nextOffset: Int = 0,
     val error: String? = null,
+    val loadMoreError: String? = null,
 )
 
 @Immutable
@@ -234,6 +235,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             loading = true,
             loadingMore = false,
             error = null,
+            loadMoreError = null,
             endReached = false,
             nextOffset = 0,
         )
@@ -248,6 +250,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 loading = true,
                 loadingMore = false,
                 error = null,
+                loadMoreError = null,
                 endReached = false,
                 nextOffset = 0,
             )
@@ -267,6 +270,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     loading = false,
                     loadingMore = false,
                     error = null,
+                    loadMoreError = null,
                     endReached = models.size < PAGE_SIZE,
                     nextOffset = models.size,
                 )
@@ -288,7 +292,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val epoch = browseEpoch
         loadMoreJob?.cancel()
         loadMoreJob = viewModelScope.launch {
-            browse = browse.copy(loadingMore = true, error = null)
+            browse = browse.copy(loadingMore = true, loadMoreError = null)
             try {
                 val models = api.listModels(
                     query = current.query,
@@ -307,7 +311,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 browse = browse.copy(
                     items = browse.items + cards,
                     loadingMore = false,
-                    error = null,
+                    loadMoreError = null,
                     endReached = models.size < PAGE_SIZE,
                     nextOffset = current.nextOffset + models.size,
                 )
@@ -316,7 +320,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 if (browseEpoch == epoch) {
-                    browse = browse.copy(loadingMore = false, error = friendlyError(e))
+                    browse = browse.copy(
+                        loadingMore = false,
+                        loadMoreError = friendlyError(e),
+                    )
                 }
             }
         }

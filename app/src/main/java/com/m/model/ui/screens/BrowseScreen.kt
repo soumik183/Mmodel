@@ -321,12 +321,10 @@ fun BrowseScreen(
                         item(key = "notice", contentType = "notice") {
                             MessageCard(
                                 icon = Icons.Rounded.CloudOff,
-                                title = "Could not load more models",
+                                title = "Could not refresh models",
                                 message = state.error.orEmpty(),
                                 actionLabel = "Retry",
-                                onAction = {
-                                    if (state.items.isEmpty()) vm.refreshBrowse() else vm.loadMoreBrowse()
-                                },
+                                onAction = vm::refreshBrowse,
                             )
                         }
                     }
@@ -338,6 +336,15 @@ fun BrowseScreen(
                         ModelRow(card = card, onClick = { onOpenModel(card.id) })
                     }
                     item(key = "footer", contentType = "footer") {
+                        state.loadMoreError?.let { error ->
+                            MessageCard(
+                                icon = Icons.Rounded.CloudOff,
+                                title = "Could not load more models",
+                                message = error,
+                                actionLabel = "Retry",
+                                onAction = vm::loadMoreBrowse,
+                            )
+                        }
                         AnimatedVisibility(
                             visible = state.loadingMore,
                             enter = fadeIn() + expandVertically(),
