@@ -1,5 +1,7 @@
 package com.m.model.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.PowerSettingsNew
@@ -95,6 +98,12 @@ fun ChatScreen(
     var input by rememberSaveable { mutableStateOf("") }
     var modelMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) vm.importLocalModel(uri)
+    }
+    val onImport: () -> Unit = { importLauncher.launch(arrayOf("*/*")) }
 
     val lastLength = state.messages.lastOrNull()?.text?.length ?: 0
     LaunchedEffect(state.messages.size, lastLength) {
@@ -119,6 +128,30 @@ fun ChatScreen(
             .fillMaxSize()
             .imePadding(),
     ) {
+        vm.downloadNotice?.let { notice ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = notice,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = vm::clearDownloadNotice) {
+                        Text("Dismiss")
+                    }
+                }
+            }
+        }
         ChatHeader(
             state = state,
             selected = selected,
@@ -130,6 +163,7 @@ fun ChatScreen(
                 vm.selectChatRecord(recordId)
             },
             onBrowse = onBrowse,
+            onImport = onImport,
             onUnload = vm::unloadChat,
             onClear = vm::clearChat,
         )
@@ -142,6 +176,7 @@ fun ChatScreen(
                     canRun = device.canRunLocalChat,
                     onSelect = { vm.selectChatRecord(it) },
                     onBrowse = onBrowse,
+                    onImport = onImport,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -222,6 +257,7 @@ private fun ChatHeader(
     onMenuExpanded: (Boolean) -> Unit,
     onSelect: (String) -> Unit,
     onBrowse: () -> Unit,
+    onImport: () -> Unit,
     onUnload: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -270,6 +306,7 @@ private fun ChatHeader(
             modifier = Modifier.fillMaxWidth(),
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
         ) {
             Row(
                 modifier = Modifier.padding(10.dp),
@@ -288,8 +325,13 @@ private fun ChatHeader(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = selected?.let { "${it.quant} · ${formatBytes(it.totalBytes)}" }
-                            ?: "Choose a downloaded model",
+                        text = selected?.let {
+                            if (it.isImported && it.totalBytes <= 0L) {
+                                "Imported · size unknown"
+                            } else {
+                                "${it.quant} · ${formatBytes(it.totalBytes)}"
+                            }
+                        } ?: "Choose a downloaded model",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -351,7 +393,7 @@ private fun ChatHeader(
                                                 overflow = TextOverflow.Ellipsis,
                                             )
                                             Text(
-                                                text = "${record.quant} · ${formatBytes(record.totalBytes)}",
+                                                text = record.sizeLabel(),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -361,6 +403,20 @@ private fun ChatHeader(
                                 )
                             }
                         }
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.FolderOpen,
+                                    contentDescription = null,
+                                )
+                            },
+                            text = { Text("Import GGUF from storage") },
+                            onClick = {
+                                onMenuExpanded(false)
+                                onImport()
+                            },
+                        )
                     }
                 }
             }
@@ -375,6 +431,7 @@ private fun EmptyChat(
     canRun: Boolean,
     onSelect: (String) -> Unit,
     onBrowse: () -> Unit,
+    onImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -387,6 +444,7 @@ private fun EmptyChat(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.extraLarge,
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
                 Column(
                     modifier = Modifier.padding(22.dp),
@@ -402,13 +460,24 @@ private fun EmptyChat(
                         style = MaterialTheme.typography.headlineSmall,
                     )
                     Text(
-                        text = "Download a GGUF quantization, then load it here. Prompts, replies and the model itself never leave the device.",
+                        text = "Download a GGUF quantization or import one already on this phone, then load it here. Prompts, replies and the model itself never leave the device.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (downloaded.isEmpty()) {
-                        Button(onClick = onBrowse) {
-                            Text("Browse models")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = onBrowse) {
+                                Text("Browse models")
+                            }
+                            OutlinedButton(onClick = onImport) {
+                                Icon(
+                                    imageVector = Icons.Rounded.FolderOpen,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Import GGUF")
+                            }
                         }
                     }
                 }
@@ -500,7 +569,7 @@ private fun DownloadedModelRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "${record.quant} · ${formatBytes(record.totalBytes)}" +
+                    text = record.sizeLabel() +
                         if (record.files.size > 1) " · ${record.files.size} shards" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -590,7 +659,7 @@ private fun LoadModelPane(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = "${record.quant} · ${formatBytes(record.totalBytes)}",
+                                text = record.sizeLabel(),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -688,6 +757,7 @@ private fun WelcomePane(
             modifier = Modifier.fillMaxWidth(),
             shape = MaterialTheme.shapes.extraLarge,
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
         ) {
             Column(
                 modifier = Modifier.padding(22.dp),
@@ -795,7 +865,7 @@ private fun ChatBubble(message: ChatMessage) {
                     text = if (user) "You" else "Mmodel",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = content.copy(alpha = 0.65f),
+                    color = content.copy(alpha = 0.82f),
                 )
                 SelectionContainer {
                     Text(
@@ -812,7 +882,7 @@ private fun ChatBubble(message: ChatMessage) {
                     Text(
                         text = meta,
                         style = MaterialTheme.typography.labelSmall,
-                        color = content.copy(alpha = 0.6f),
+                        color = content.copy(alpha = 0.8f),
                     )
                 }
             }
@@ -958,3 +1028,6 @@ private fun InlineError(text: String) {
         }
     }
 }
+
+private fun DownloadRecord.sizeLabel(): String =
+    if (isImported && totalBytes <= 0L) "Imported · size unknown" else "$quant · ${formatBytes(totalBytes)}"

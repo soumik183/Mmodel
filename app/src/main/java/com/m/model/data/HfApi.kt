@@ -32,19 +32,21 @@ class HfApi(
     suspend fun listModels(
         query: String,
         sort: ModelSort,
-        ggufOnly: Boolean,
-        limit: Int = 50,
+        category: ModelCategory = ModelCategory.GGUF,
+        limit: Int = 20,
+        skip: Int = 0,
         withGguf: Boolean = false,
     ): List<HfModel> = withContext(Dispatchers.IO) {
         val url = base.newBuilder()
-            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("limit", limit.coerceIn(1, 100).toString())
             .addQueryParameter("sort", sort.apiValue)
             .addQueryParameter("direction", "-1")
             .addQueryParameter("full", "true")
             .addQueryParameter("blobs", "true")
             .apply {
                 if (query.isNotBlank()) addQueryParameter("search", query.trim())
-                if (ggufOnly) addQueryParameter("filter", "gguf")
+                if (skip > 0) addQueryParameter("skip", skip.toString())
+                category.filters.forEach { addQueryParameter("filter", it) }
                 if (withGguf) addQueryParameter("expand", "gguf")
             }
             .build()
@@ -73,7 +75,7 @@ class HfApi(
     private fun fetch(url: String): String {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mmodel/1.3 (Android)")
+            .header("User-Agent", "Mmodel/1.4 (Android)")
             .header("Accept", "application/json")
             .build()
 

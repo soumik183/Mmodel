@@ -1,6 +1,12 @@
 package com.m.model.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,17 +47,22 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.m.model.data.ModelCategory
 import com.m.model.data.ModelSort
 import com.m.model.ui.MainViewModel
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.ModelRow
+import kotlinx.coroutines.flow.collect
 
 @Composable
 fun BrowseScreen(
@@ -59,6 +72,16 @@ fun BrowseScreen(
 ) {
     val state = vm.browse
     var sortMenuOpen by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            last to vm.browse.items.size
+        }.collect { (last, count) ->
+            if (count > 0 && last >= count - 4) vm.loadMoreBrowse()
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         Column(
@@ -78,7 +101,11 @@ fun BrowseScreen(
                         text = when {
                             state.loading && state.items.isEmpty() -> "Reading the Hugging Face catalog…"
                             state.items.isEmpty() -> "Search the Hugging Face catalog"
-                            else -> "${state.items.size} models · Hugging Face catalog"
+                            else -> buildString {
+                                append(state.items.size)
+                                if (!state.endReached) append("+")
+                                append(" models · Hugging Face")
+                            }
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -144,20 +171,29 @@ fun BrowseScreen(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilterChip(
-                    selected = state.ggufOnly,
-                    onClick = { vm.setGgufOnly(!state.ggufOnly) },
-                    label = { Text("GGUF only") },
-                    shape = CircleShape,
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
-                )
-                Spacer(Modifier.weight(1f))
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ModelCategory.entries.forEach { category ->
+                        FilterChip(
+                            selected = state.category == category,
+                            onClick = { vm.setCategory(category) },
+                            label = { Text(category.label) },
+                            shape = CircleShape,
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                        )
+                    }
+                }
                 Box {
                     Surface(
                         onClick = { sortMenuOpen = true },
@@ -262,13 +298,14 @@ fun BrowseScreen(
                     MessageCard(
                         icon = Icons.Rounded.Search,
                         title = "No models found",
-                        message = "Try a different name, or turn off the GGUF filter.",
+                        message = "Try a different name, or pick another category.",
                     )
                 }
             }
 
             else -> {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
@@ -281,13 +318,15 @@ fun BrowseScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     if (state.error != null) {
-                        item(contentType = "notice") {
+                        item(key = "notice", contentType = "notice") {
                             MessageCard(
                                 icon = Icons.Rounded.CloudOff,
-                                title = "Refresh failed",
+                                title = "Could not load more models",
                                 message = state.error.orEmpty(),
                                 actionLabel = "Retry",
-                                onAction = vm::refreshBrowse,
+                                onAction = {
+                                    if (state.items.isEmpty()) vm.refreshBrowse() else vm.loadMoreBrowse()
+                                },
                             )
                         }
                     }
@@ -297,6 +336,47 @@ fun BrowseScreen(
                         contentType = { "model" },
                     ) { card ->
                         ModelRow(card = card, onClick = { onOpenModel(card.id) })
+                    }
+                    item(key = "footer", contentType = "footer") {
+                        AnimatedVisibility(
+                            visible = state.loadingMore,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 14.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = "Loading the next 20 models…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        AnimatedVisibility(
+                            visible = state.endReached && !state.loadingMore,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically(),
+                        ) {
+                            Text(
+                                text = "End of the catalog · ${state.items.size} models",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 }
             }

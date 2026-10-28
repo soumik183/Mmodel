@@ -60,3 +60,16 @@ enum class ModelSort(val label: String, val apiValue: String) {
     LIKED("Most liked", "likes"),
     RECENT("Recently updated", "lastModified"),
 }
+
+/**
+ * Hugging Face treats repeated `filter` parameters as AND. Task categories
+ * also include `gguf` so every result has a downloadable local-chat file.
+ */
+enum class ModelCategory(val label: String, val filters: List<String>) {
+    ALL("All", emptyList()),
+    GGUF("GGUF", listOf("gguf")),
+    CHAT("Chat", listOf("gguf", "text-generation")),
+    VISION("Vision", listOf("gguf", "image-text-to-text")),
+    AUDIO("Audio", listOf("gguf", "audio")),
+    EMBEDDINGS("Embeddings", listOf("gguf", "feature-extraction")),
+}

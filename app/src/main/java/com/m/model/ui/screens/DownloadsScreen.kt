@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -79,6 +82,11 @@ fun DownloadsScreen(
     val device = vm.device
     val context = LocalContext.current
     var deleteTarget by remember { mutableStateOf<DownloadRecord?>(null) }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) vm.importLocalModel(uri)
+    }
 
     val freeBytes = vm.downloadFreeBytes()
     val readyBytes = records.filter { it.isComplete }.sumOf { it.totalBytes }
@@ -115,6 +123,7 @@ fun DownloadsScreen(
                 freeBytes = freeBytes,
                 readyBytes = readyBytes,
                 onCopy = { copyPath(context, vm.downloadsRootPath) },
+                onImport = { importLauncher.launch(arrayOf("*/*")) },
             )
         }
 
@@ -139,7 +148,7 @@ fun DownloadsScreen(
                 MessageCard(
                     icon = Icons.Rounded.Download,
                     title = "No models on this phone yet",
-                    message = "Pick a GGUF quantization on a model page, then track its progress and path here. Downloads stay in app-private storage.",
+                    message = "Download a GGUF quantization, or import one you already have. Imported files stay in their original folder and are loaded without copying.",
                     actionLabel = "Explore models",
                     onAction = onBrowse,
                 )
@@ -178,8 +187,12 @@ fun DownloadsScreen(
             title = { Text("Delete downloaded model?") },
             text = {
                 Text(
-                    "This removes ${target.displayName} (${formatBytes(target.totalBytes)}) from this phone. " +
-                        "The Hugging Face copy is not affected.",
+                    if (target.isImported) {
+                        "This removes ${target.displayName} from Mmodel. The original file in storage is not deleted."
+                    } else {
+                        "This removes ${target.displayName} (${formatBytes(target.totalBytes)}) from this phone. " +
+                            "The Hugging Face copy is not affected."
+                    },
                 )
             },
             confirmButton = {
@@ -207,6 +220,7 @@ private fun StorageCard(
     freeBytes: Long,
     readyBytes: Long,
     onCopy: () -> Unit,
+    onImport: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -260,7 +274,7 @@ private fun StorageCard(
                     Text(
                         text = "free storage",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.82f),
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -271,10 +285,31 @@ private fun StorageCard(
                     Text(
                         text = "models on device",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.82f),
                     )
                 }
             }
+            OutlinedButton(
+                onClick = onImport,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.24f),
+                ),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.FolderOpen,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Import GGUF from storage")
+            }
+            Text(
+                text = "Pick a single-file GGUF from any folder. The original file stays where it is.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.84f),
+            )
         }
     }
 }
@@ -359,9 +394,13 @@ private fun DownloadCard(
             }
 
             Text(
-                text = record.dirPath,
+                text = if (record.isImported) {
+                    "Imported from device storage · original file is not copied"
+                } else {
+                    record.dirPath
+                },
                 style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = if (record.isImported) FontFamily.Default else FontFamily.Monospace,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -377,7 +416,11 @@ private fun DownloadCard(
                 }
                 Text(
                     text = if (record.isComplete) {
-                        formatBytes(record.totalBytes)
+                        if (record.isImported && record.totalBytes <= 0L) {
+                            "Imported · size unknown"
+                        } else {
+                            formatBytes(record.totalBytes)
+                        }
                     } else if (record.totalBytes > 0L) {
                         "${formatBytes(record.doneBytes)} / ${formatBytes(record.totalBytes)}"
                     } else {
@@ -505,15 +548,19 @@ private fun DownloadCard(
                     }
                 }
 
-                TextButton(onClick = onOpenModel) {
-                    Text("Model page")
+                if (!record.isImported) {
+                    TextButton(onClick = onOpenModel) {
+                        Text("Model page")
+                    }
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = onCopyPath) {
-                    Icon(
-                        imageVector = Icons.Rounded.ContentCopy,
-                        contentDescription = "Copy model folder path",
-                    )
+                if (!record.isImported) {
+                    IconButton(onClick = onCopyPath) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCopy,
+                            contentDescription = "Copy model folder path",
+                        )
+                    }
                 }
                 IconButton(onClick = onDelete) {
                     Icon(

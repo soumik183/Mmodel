@@ -71,42 +71,66 @@ class LlamaEngine {
                 throw EngineFailure("This file is not a valid GGUF model.")
             }
 
-            val threads = defaultThreads()
-            var descriptor: ParcelFileDescriptor? = null
-            try {
-                val opened = ParcelFileDescriptor.open(
-                    file,
-                    ParcelFileDescriptor.MODE_READ_ONLY,
-                )
-                descriptor = opened
-                val context = LlamaContext(
-                    Random.nextInt().absoluteValue,
-                    mapOf(
-                        "model" to file.absolutePath,
-                        "model_fd" to opened.fd,
-                        "use_mmap" to false,
-                        "use_mlock" to false,
-                        "n_ctx" to contextLength.coerceIn(512, 4_096),
-                        "n_batch" to 256,
-                        "n_threads" to threads,
-                    ),
-                )
-                context.setTokenCallback { token -> tokenSink?.invoke(token) }
+            val opened = ParcelFileDescriptor.open(
+                file,
+                ParcelFileDescriptor.MODE_READ_ONLY,
+            )
+            createSessionLocked(opened, file.absolutePath, contextLength)
+        }
+    }
 
-                if (!currentCoroutineContext().isActive) {
-                    runCatching { context.release() }
-                    throw CancellationException("Model load cancelled")
-                }
+    /** Loads a model from a SAF descriptor without copying it into app storage. */
+    suspend fun load(
+        descriptor: ParcelFileDescriptor,
+        modelName: String,
+        contextLength: Int = 2_048,
+    ): Loaded = withContext(Dispatchers.IO) {
+        operation.withLock {
+            unloadLocked()
+            createSessionLocked(descriptor, modelName, contextLength)
+        }
+    }
 
-                synchronized(lock) {
-                    session = Session(context, opened, file.absolutePath)
-                }
-                Loaded(contextLength, threads, context.modelDetails)
-            } catch (t: Throwable) {
-                runCatching { descriptor?.close() }
-                if (t is CancellationException) throw t
-                throw if (t is EngineFailure) t else EngineFailure(failureMessage(t), t)
+    private suspend fun createSessionLocked(
+        opened: ParcelFileDescriptor,
+        label: String,
+        contextLength: Int,
+    ): Loaded {
+        if (!isSupported) {
+            runCatching { opened.close() }
+            throw EngineFailure("Local chat needs a 64-bit ARM phone.")
+        }
+
+        val threads = defaultThreads()
+        val chosenContextLength = contextLength.coerceIn(512, 4_096)
+        try {
+            val context = LlamaContext(
+                Random.nextInt().absoluteValue,
+                mapOf(
+                    "model" to label,
+                    "model_fd" to opened.fd,
+                    "use_mmap" to false,
+                    "use_mlock" to false,
+                    "n_ctx" to chosenContextLength,
+                    "n_batch" to 256,
+                    "n_threads" to threads,
+                ),
+            )
+            context.setTokenCallback { token -> tokenSink?.invoke(token) }
+
+            if (!currentCoroutineContext().isActive) {
+                runCatching { context.release() }
+                throw CancellationException("Model load cancelled")
             }
+
+            synchronized(lock) {
+                session = Session(context, opened, label)
+            }
+            return Loaded(chosenContextLength, threads, context.modelDetails)
+        } catch (t: Throwable) {
+            runCatching { opened.close() }
+            if (t is CancellationException) throw t
+            throw if (t is EngineFailure) t else EngineFailure(failureMessage(t), t)
         }
     }
 

@@ -257,7 +257,7 @@ private fun HeroCard(device: DeviceSpecs, onExplore: () -> Unit) {
                 Text(
                     text = "DEVICE READY",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.64f),
+                    color = Color.White.copy(alpha = 0.82f),
                     letterSpacing = 1.8.sp,
                 )
             }
@@ -269,7 +269,7 @@ private fun HeroCard(device: DeviceSpecs, onExplore: () -> Unit) {
             Text(
                 text = device.displayName,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.7f),
+                color = Color.White.copy(alpha = 0.84f),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HeroPill(text = "${formatBytes(device.totalRamBytes)} RAM")

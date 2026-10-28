@@ -1,6 +1,7 @@
 package com.m.model.data
 
 import android.content.Context
+import android.net.Uri
 import android.os.StatFs
 import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CancellationException
@@ -60,12 +61,18 @@ data class DownloadRecord(
     val contextLength: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val completedAt: Long? = null,
+    /** A persisted SAF URI for a GGUF imported from the phone. */
+    val sourceUri: String? = null,
 ) {
     val totalBytes: Long get() = files.sumOf { it.bytesTotal }
     val doneBytes: Long get() = files.sumOf { if (it.done) it.bytesTotal else it.bytesDone }
     val isComplete: Boolean get() = files.isNotEmpty() && files.all { it.done }
-    val firstPath: String? get() = files.firstOrNull()
-        ?.let { File(dirPath, it.localName).absolutePath }
+    val isImported: Boolean get() = !sourceUri.isNullOrBlank()
+    val firstPath: String? get() = if (isImported) {
+        null
+    } else {
+        files.firstOrNull()?.let { File(dirPath, it.localName).absolutePath }
+    }
     val displayName: String get() = "$modelName · $quant"
 
     companion object {
@@ -145,6 +152,35 @@ class DownloadStore(context: Context) {
         StatFs(modelsRoot.absolutePath).availableBytes
     }.getOrDefault(0L)
 
+    fun addImported(uri: Uri, displayName: String, bytes: Long): DownloadRecord {
+        val safeName = displayName.substringAfterLast('/').ifBlank { "Imported model.gguf" }
+        val id = "local|$uri|$safeName"
+        _records.value.firstOrNull { it.id == id }?.let { return it }
+
+        val record = DownloadRecord(
+            id = id,
+            modelId = "local/$safeName",
+            modelName = safeName.dropLast(5).ifBlank { "Imported model" },
+            quant = "Imported",
+            dirPath = "",
+            files = listOf(
+                DownloadFile(
+                    remoteName = safeName,
+                    localName = safeName,
+                    bytesTotal = bytes.coerceAtLeast(0L),
+                    bytesDone = bytes.coerceAtLeast(0L),
+                    done = true,
+                ),
+            ),
+            status = DownloadStatus.DONE,
+            completedAt = System.currentTimeMillis(),
+            sourceUri = uri.toString(),
+        )
+        _records.update { current -> listOf(record) + current }
+        persist()
+        return record
+    }
+
     fun startNew(record: DownloadRecord, scope: CoroutineScope): String? {
         val busy = synchronized(activeLock) { activeJob != null }
         if (busy) return "Another download is already running."
@@ -171,6 +207,7 @@ class DownloadStore(context: Context) {
 
             val current = _records.value.firstOrNull { it.id == recordId }
                 ?: return "Download not found."
+            if (current.isImported) return "This model is loaded from device storage."
             if (current.isComplete) {
                 markStatus(recordId, DownloadStatus.DONE, null)
                 return null
@@ -231,11 +268,13 @@ class DownloadStore(context: Context) {
             job?.cancelAndJoin()
 
             val record = _records.value.firstOrNull { it.id == recordId } ?: return@launch
-            record.files.forEach { file ->
-                runCatching { File(record.dirPath, file.localName).delete() }
-                runCatching { File(record.dirPath, file.localName + ".part").delete() }
+            if (!record.isImported) {
+                record.files.forEach { file ->
+                    runCatching { File(record.dirPath, file.localName).delete() }
+                    runCatching { File(record.dirPath, file.localName + ".part").delete() }
+                }
+                runCatching { File(record.dirPath).delete() }
             }
-            runCatching { File(record.dirPath).delete() }
 
             _records.update { list -> list.filterNot { it.id == recordId } }
             persist()
@@ -314,7 +353,7 @@ class DownloadStore(context: Context) {
 
         val requestBuilder = Request.Builder()
             .url(resolveUrl(record.modelId, file.remoteName))
-            .header("User-Agent", "Mmodel/1.3 (Android)")
+            .header("User-Agent", "Mmodel/1.4 (Android)")
             .header("Accept-Encoding", "identity")
         if (existing > 0 && (file.bytesTotal <= 0L || existing < file.bytesTotal)) {
             requestBuilder.header("Range", "bytes=$existing-")

@@ -1,6 +1,9 @@
 package com.m.model.ui
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,9 +23,11 @@ import com.m.model.data.HfHttpException
 import com.m.model.data.HfModel
 import com.m.model.data.LlamaEngine
 import com.m.model.data.ModelCard
+import com.m.model.data.ModelCategory
 import com.m.model.data.ModelFit
 import com.m.model.data.ModelSort
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -34,6 +39,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
@@ -47,9 +53,12 @@ import kotlin.math.log10
 data class BrowseState(
     val query: String = "",
     val sort: ModelSort = ModelSort.TRENDING,
-    val ggufOnly: Boolean = true,
+    val category: ModelCategory = ModelCategory.GGUF,
     val items: List<ModelCard> = emptyList(),
     val loading: Boolean = true,
+    val loadingMore: Boolean = false,
+    val endReached: Boolean = false,
+    val nextOffset: Int = 0,
     val error: String? = null,
 )
 
@@ -94,6 +103,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val api = HfApi()
     private val cache = mutableMapOf<String, ModelCard>()
     private var searchJob: Job? = null
+    private var loadMoreJob: Job? = null
+    private var browseEpoch = 0
     private var recommendationsJob: Job? = null
     private var recommendationsEpoch = 0
     private var browseRequested = false
@@ -174,9 +185,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scheduleSearch(0)
     }
 
-    fun setGgufOnly(value: Boolean) {
-        if (browse.ggufOnly == value) return
-        browse = browse.copy(ggufOnly = value)
+    fun setCategory(value: ModelCategory) {
+        if (browse.category == value) return
+        browse = browse.copy(category = value, items = emptyList(), endReached = false)
         scheduleSearch(0)
     }
 
@@ -217,44 +228,112 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun scheduleSearch(delayMs: Long) {
         browseRequested = true
         searchJob?.cancel()
+        loadMoreJob?.cancel()
+        val epoch = ++browseEpoch
+        browse = browse.copy(
+            loading = true,
+            loadingMore = false,
+            error = null,
+            endReached = false,
+            nextOffset = 0,
+        )
         searchJob = viewModelScope.launch {
             if (delayMs > 0) delay(delayMs)
 
             val query = browse.query
             val sort = browse.sort
-            val ggufOnly = browse.ggufOnly
+            val category = browse.category
 
-            browse = browse.copy(loading = true, error = null)
+            browse = browse.copy(
+                loading = true,
+                loadingMore = false,
+                error = null,
+                endReached = false,
+                nextOffset = 0,
+            )
             try {
-                val models = api.listModels(query, sort, ggufOnly, withGguf = true)
-                val cards = models.map { analyze(it) }
-                browse = browse.copy(items = cards, loading = false, error = null)
+                val models = api.listModels(
+                    query = query,
+                    sort = sort,
+                    category = category,
+                    limit = PAGE_SIZE,
+                    withGguf = true,
+                )
+                if (browseEpoch != epoch) return@launch
 
-                // Search responses omit file sizes. Enrich a few leading cards so they
-                // show a real fit without opening each model.
-                val unknown = cards.filter { it.downloadBytes == null }.take(8)
-                if (unknown.isNotEmpty()) {
-                    fun apply(card: ModelCard) {
-                        cache[card.id] = card
-                        if (browse.query == query && browse.sort == sort && browse.ggufOnly == ggufOnly) {
-                            browse = browse.copy(
-                                items = browse.items.map { if (it.id == card.id) card else it },
-                            )
-                        }
-                    }
-                    val detailed = hydrate(unknown.map { it.id }, 8, ::apply)
-                    if (detailed.isNotEmpty()) {
-                        val byId = detailed.associateBy { it.id }
-                        cache.putAll(byId)
-                        if (browse.query == query && browse.sort == sort && browse.ggufOnly == ggufOnly) {
-                            browse = browse.copy(items = browse.items.map { byId[it.id] ?: it })
-                        }
-                    }
-                }
+                val cards = models.map { analyze(it) }.distinctBy { it.id }
+                browse = browse.copy(
+                    items = cards,
+                    loading = false,
+                    loadingMore = false,
+                    error = null,
+                    endReached = models.size < PAGE_SIZE,
+                    nextOffset = models.size,
+                )
+                hydrateUnknownSizes(cards, epoch)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                browse = browse.copy(loading = false, error = friendlyError(e))
+                if (browseEpoch == epoch) {
+                    browse = browse.copy(loading = false, error = friendlyError(e))
+                }
+            }
+        }
+    }
+
+    fun loadMoreBrowse() {
+        val current = browse
+        if (current.loading || current.loadingMore || current.endReached || current.items.isEmpty()) return
+
+        val epoch = browseEpoch
+        loadMoreJob?.cancel()
+        loadMoreJob = viewModelScope.launch {
+            browse = browse.copy(loadingMore = true, error = null)
+            try {
+                val models = api.listModels(
+                    query = current.query,
+                    sort = current.sort,
+                    category = current.category,
+                    limit = PAGE_SIZE,
+                    skip = current.nextOffset,
+                    withGguf = true,
+                )
+                if (browseEpoch != epoch) return@launch
+
+                val seen = browse.items.mapTo(HashSet()) { it.id }
+                val cards = models
+                    .map { analyze(it) }
+                    .filter { seen.add(it.id) }
+                browse = browse.copy(
+                    items = browse.items + cards,
+                    loadingMore = false,
+                    error = null,
+                    endReached = models.size < PAGE_SIZE,
+                    nextOffset = current.nextOffset + models.size,
+                )
+                hydrateUnknownSizes(cards, epoch)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (browseEpoch == epoch) {
+                    browse = browse.copy(loadingMore = false, error = friendlyError(e))
+                }
+            }
+        }
+    }
+
+    private fun hydrateUnknownSizes(cards: List<ModelCard>, epoch: Int) {
+        val unknown = cards.filter { it.downloadBytes == null }.take(8)
+        if (unknown.isEmpty()) return
+
+        viewModelScope.launch {
+            hydrate(unknown.map { it.id }, 8) { card ->
+                if (browseEpoch == epoch) {
+                    cache[card.id] = card
+                    browse = browse.copy(
+                        items = browse.items.map { if (it.id == card.id) card else it },
+                    )
+                }
             }
         }
     }
@@ -269,7 +348,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val models = api.listModels(
                     query = "",
                     sort = ModelSort.TRENDING,
-                    ggufOnly = true,
+                    category = ModelCategory.GGUF,
                     limit = 100,
                     withGguf = true,
                 )
@@ -460,6 +539,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         downloadNotice = null
     }
 
+    fun importLocalModel(uri: Uri) {
+        downloadNotice = null
+        viewModelScope.launch {
+            try {
+                val record = withContext(Dispatchers.IO) {
+                    val resolver = getApplication<Application>().contentResolver
+                    val name = queryDisplayName(uri)
+                    require(name.endsWith(".gguf", ignoreCase = true)) {
+                        "Choose a .gguf model file."
+                    }
+                    require(!SHARD_NAME.containsMatchIn(name)) {
+                        "Sharded GGUFs cannot be loaded from storage. Pick a single-file model."
+                    }
+                    require(hasGgufHeader(uri)) {
+                        "This file is not a valid GGUF model."
+                    }
+
+                    // Keep access across restarts when the provider allows it.
+                    runCatching {
+                        resolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    }
+                    downloadsStore.addImported(uri, name, queryFileSize(uri))
+                }
+                downloadNotice = "Imported ${record.modelName}. Open it in Chat or Downloads."
+            } catch (e: IllegalArgumentException) {
+                downloadNotice = e.message ?: "This file cannot be imported."
+            } catch (e: Exception) {
+                downloadNotice = e.message ?: "Could not read this file from storage."
+            }
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String {
+        val resolver = getApplication<Application>().contentResolver
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getString(0)?.takeIf { it.isNotBlank() }?.let { return it }
+                }
+            }
+        return uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() }
+            ?: "Imported model.gguf"
+    }
+
+    private fun queryFileSize(uri: Uri): Long {
+        val resolver = getApplication<Application>().contentResolver
+        resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0)
+            }
+        return runCatching {
+            resolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+        }.getOrNull()?.takeIf { it > 0L } ?: 0L
+    }
+
+    private fun hasGgufHeader(uri: Uri): Boolean = runCatching {
+        getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+            val header = ByteArray(4)
+            var read = 0
+            while (read < header.size) {
+                val count = input.read(header, read, header.size - read)
+                if (count <= 0) return@use false
+                read += count
+            }
+            header.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46))
+        } ?: false
+    }.getOrDefault(false)
+
     fun downloadFreeBytes(): Long = downloadsStore.freeBytes()
 
     fun openChatFor(recordId: String) {
@@ -562,14 +714,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         _chat.update { it.copy(loadingModel = true, ready = false, error = null, status = null) }
         try {
-            val path = record.firstPath
-            if (path == null) {
-                throw IllegalStateException("The model file is missing. Download it again.")
-            }
             val contextLength = (record.contextLength ?: 2_048L)
                 .coerceIn(512L, 2_048L)
                 .toInt()
-            val loaded = engine.load(File(path), contextLength)
+            val loaded = if (record.isImported) {
+                val sourceUri = record.sourceUri
+                    ?: throw IllegalStateException("Import this GGUF again.")
+                val uri = Uri.parse(sourceUri)
+                val descriptor = getApplication<Application>().contentResolver
+                    .openFileDescriptor(uri, "r")
+                    ?: throw IllegalStateException(
+                        "Storage access expired. Import this GGUF again.",
+                    )
+                engine.load(descriptor, record.modelName, contextLength)
+            } else {
+                val path = record.firstPath
+                    ?: throw IllegalStateException("The model file is missing. Download it again.")
+                engine.load(File(path), contextLength)
+            }
 
             if (_chat.value.recordId != record.id || chatLoadEpoch != epoch) {
                 return
@@ -869,5 +1031,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val KEY_LAST_MODEL = "last_model"
+        const val PAGE_SIZE = 20
+        val SHARD_NAME = Regex("""-\d{5}-of-\d{5}\.gguf$""", RegexOption.IGNORE_CASE)
     }
 }

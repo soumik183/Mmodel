@@ -35,10 +35,56 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
+      - name: Check release signing secrets
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release signing secrets are missing; publishing a debug APK instead."
+          fi
+
+      - name: Decode release keystore
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mmodel-release.keystore"
+
+      - name: Test and build debug APK
         run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK artifact
+      - name: Build signed release APK
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          MMODEL_KEYSTORE_PATH: ${{ runner.temp }}/mmodel-release.keystore
+          MMODEL_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          MMODEL_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          MMODEL_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify release signature
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload signed APK artifact
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mmodel-signed-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload debug APK artifact
+        if: steps.signing.outputs.enabled != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Mmodel-debug-apk
@@ -50,5 +96,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view latest > /dev/null 2>&1 || gh release create latest --title "Mmodel latest APK" --notes "Auto-built debug APK from $GITHUB_SHA." --prerelease --target "$GITHUB_SHA"
-          gh release upload latest app/build/outputs/apk/debug/app-debug.apk --clobber
+          if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
+            APK=app/build/outputs/apk/release/app-release.apk
+            ASSET=app-release.apk
+            NOTES="Signed Mmodel 1.4 release build from $GITHUB_SHA."
+          else
+            APK=app/build/outputs/apk/debug/app-debug.apk
+            ASSET=app-debug.apk
+            NOTES="Debug Mmodel 1.4 build from $GITHUB_SHA. Add signing secrets to publish a signed release."
+          fi
+
+          cp "$APK" "$RUNNER_TEMP/$ASSET"
+          gh release view latest > /dev/null 2>&1 || \
+            gh release create latest --title "Mmodel latest APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          gh release upload latest "$RUNNER_TEMP/$ASSET" --clobber
+
+          if [ "$ASSET" = "app-release.apk" ]; then
+            gh release delete-asset latest app-debug.apk --yes || true
+          fi

@@ -2,8 +2,10 @@ package com.m.model.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -152,24 +155,35 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
 
 @Composable
 private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val shape = RoundedCornerShape(30.dp)
+    val glass = Brush.horizontalGradient(
+        listOf(
+            MaterialTheme.colorScheme.surface.copy(alpha = if (dark) 0.72f else 0.82f),
+            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = if (dark) 0.62f else 0.72f),
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (dark) 0.28f else 0.36f),
+        ),
+    )
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.97f),
+        shape = shape,
+        color = Color.Transparent,
         border = BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (dark) 0.42f else 0.55f),
         ),
-        shadowElevation = 10.dp,
+        shadowElevation = 14.dp,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .padding(6.dp),
+                .height(66.dp)
+                .background(glass)
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             appTabs.forEachIndexed { index, item ->
@@ -186,15 +200,19 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                     targetValue = if (active) {
                         MaterialTheme.colorScheme.onPrimary
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        MaterialTheme.colorScheme.onSurface
                     },
                     label = "navContent",
+                )
+                val iconScale by animateFloatAsState(
+                    targetValue = if (active) 1f else 0.9f,
+                    label = "navIconScale",
                 )
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(24.dp))
                         .selectable(
                             selected = active,
                             onClick = { onSelect(index) },
@@ -210,7 +228,12 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                         Icon(
                             imageVector = item.icon,
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                },
                             tint = content,
                         )
                         Text(

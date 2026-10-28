@@ -5,6 +5,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val releaseKeystore = System.getenv("MMODEL_KEYSTORE_PATH")
+val releaseStorePassword = System.getenv("MMODEL_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("MMODEL_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("MMODEL_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseKeystore,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.m.model"
     compileSdk = 35
@@ -13,8 +24,8 @@ android {
         applicationId = "com.m.model"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
 
         ndk {
             // The llama.cpp runtime ships arm64-v8a only.
@@ -22,9 +33,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystore!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
