@@ -182,6 +182,7 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(66.dp)
+                .clip(shape)
                 .background(glass)
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,

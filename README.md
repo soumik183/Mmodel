@@ -34,7 +34,6 @@ Every push to `main` builds and tests in GitHub Actions. When release signing se
 
 **Direct download (latest):**
 [app-release.apk](https://github.com/soumik183/Mmodel/releases/download/latest/app-release.apk)
-(fallback: [app-debug.apk](https://github.com/soumik183/Mmodel/releases/download/latest/app-debug.apk))
 
 Or open the [latest release page](https://github.com/soumik183/Mmodel/releases/tag/latest), or download the `Mmodel-signed-apk` / `Mmodel-debug-apk` artifact from the [Actions tab](https://github.com/soumik183/Mmodel/actions).
 
