@@ -20,11 +20,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
@@ -56,6 +59,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.m.model.data.ModelCategory
 import com.m.model.data.ModelSort
@@ -63,16 +67,26 @@ import com.m.model.ui.MainViewModel
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.ModelRow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
 
 @Composable
 fun BrowseScreen(
     vm: MainViewModel,
     modifier: Modifier = Modifier,
     onOpenModel: (String) -> Unit,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val state = vm.browse
     var sortMenuOpen by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
+
+    // A new query, category or sort starts at the top. drop(1) ignores the value
+    // re-emitted when this screen returns from a model detail, so the previous
+    // scroll position survives navigation.
+    LaunchedEffect(listState) {
+        snapshotFlow { Triple(vm.browse.query, vm.browse.category, vm.browse.sort) }
+            .drop(1)
+            .collect { runCatching { listState.scrollToItem(0) } }
+    }
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -104,7 +118,7 @@ fun BrowseScreen(
                             else -> buildString {
                                 append(state.items.size)
                                 if (!state.endReached) append("+")
-                                append(" models · Hugging Face")
+                                append(" models · ${state.category.label} · Hugging Face")
                             }
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -159,6 +173,8 @@ fun BrowseScreen(
                 },
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { vm.searchNow() }),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface,

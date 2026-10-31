@@ -37,3 +37,12 @@ fun formatContext(tokens: Long?): String {
     if (tokens == null || tokens <= 0L) return "—"
     return String.format(Locale.US, "%.0fK tokens", tokens / 1024.0)
 }
+
+/** Turns a Hugging Face pipeline tag such as `image-text-to-text` into a label. */
+fun formatTask(value: String?): String {
+    if (value.isNullOrBlank()) return "—"
+    return value
+        .replace('_', ' ')
+        .replace('-', ' ')
+        .replaceFirstChar { it.titlecase(Locale.US) }
+}

@@ -47,6 +47,7 @@ import com.m.model.data.Fit
 import com.m.model.data.ModelCard
 import com.m.model.ui.formatBytes
 import com.m.model.ui.formatParams
+import com.m.model.ui.formatTask
 import com.m.model.ui.theme.AvatarPalettes
 import com.m.model.ui.theme.BrandGradient
 
@@ -392,7 +393,7 @@ fun ModelRow(card: ModelCard, onClick: () -> Unit) {
             LetterAvatar(name = card.name, size = 56.dp)
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Text(
                     text = card.name,
@@ -401,13 +402,36 @@ fun ModelRow(card: ModelCard, onClick: () -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = card.author.ifBlank { "Hugging Face" },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = card.author.ifBlank { "Hugging Face" },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    card.model.pipelineTag
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { tag ->
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                contentColor = MaterialTheme.colorScheme.primary,
+                            ) {
+                                Text(
+                                    text = formatTask(tag),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -415,8 +439,18 @@ fun ModelRow(card: ModelCard, onClick: () -> Unit) {
                     FitBadge(fit = card.fit.fit)
                     Text(
                         text = buildString {
-                            append(formatBytes(card.downloadBytes))
+                            append(
+                                if (card.downloadBytes != null) {
+                                    formatBytes(card.downloadBytes)
+                                } else {
+                                    "Size unknown"
+                                },
+                            )
                             card.parameters?.let { append("  ·  ${formatParams(it)}") }
+                            if (card.ggufVariants > 0) {
+                                append("  ·  ${card.ggufVariants} quant")
+                                if (card.ggufVariants != 1) append("s")
+                            }
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -353,7 +353,7 @@ class DownloadStore(context: Context) {
 
         val requestBuilder = Request.Builder()
             .url(resolveUrl(record.modelId, file.remoteName))
-            .header("User-Agent", "Mmodel/1.4 (Android)")
+            .header("User-Agent", "Mmodel/1.5 (Android)")
             .header("Accept-Encoding", "identity")
         if (existing > 0 && (file.bytesTotal <= 0L || existing < file.bytesTotal)) {
             requestBuilder.header("Range", "bytes=$existing-")

@@ -105,6 +105,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val cache = mutableMapOf<String, ModelCard>()
     private var searchJob: Job? = null
     private var loadMoreJob: Job? = null
+    private var detailJob: Job? = null
+    private var detailFetchingId: String? = null
     private var browseEpoch = 0
     private var recommendationsJob: Job? = null
     private var recommendationsEpoch = 0
@@ -439,21 +441,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openModel(id: String) {
         if (id.isBlank()) return
 
-        val cached = cache[id]
-        if (detail.id == id && (cached != null || detail.loading)) {
-            if (cached != null && detail.card == null) {
-                detail = DetailState(id = id, card = cached)
+        // Reuse whatever the list already loaded so the detail screen paints on
+        // the first frame instead of showing a spinner while it hits the network.
+        val seeded = cache[id]
+            ?: browse.items.firstOrNull { it.id == id }
+            ?: recommendations.firstOrNull { it.id == id }
+        if (seeded != null) {
+            cache[id] = seeded
+            if (detail.id != id || detail.card == null) {
+                detail = DetailState(id = id, card = seeded)
             }
-            return
+        } else if (detail.id != id) {
+            detail = DetailState(id = id, loading = true)
         }
 
-        if (cached != null) {
-            detail = DetailState(id = id, card = cached)
-            return
-        }
+        // List rows carry light metadata only, so pull the full sibling list the
+        // first time a model is opened and refresh the card in place.
+        if (seeded == null || needsDetail(seeded)) refreshDetail(id)
+    }
 
-        detail = DetailState(id = id, loading = true)
-        viewModelScope.launch {
+    private fun needsDetail(card: ModelCard): Boolean =
+        card.model.siblings.isEmpty() ||
+            (card.variants.isEmpty() && card.downloadBytes == null)
+
+    private fun refreshDetail(id: String) {
+        if (detailFetchingId == id) return
+        detailJob?.cancel()
+        detailFetchingId = id
+        detailJob = viewModelScope.launch {
             try {
                 val card = analyze(api.getModel(id))
                 cache[id] = card
@@ -462,15 +477,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 if (detail.id == id) {
-                    val fallback = cache[id]?.takeIf {
-                        it.model.siblings.isNotEmpty() || it.variants.isNotEmpty()
-                    }
-                    detail = if (fallback != null) {
-                        DetailState(id = id, card = fallback, error = friendlyError(e))
+                    detail = if (detail.card != null) {
+                        detail.copy(error = friendlyError(e))
                     } else {
                         DetailState(id = id, error = friendlyError(e))
                     }
                 }
+            } finally {
+                if (detailFetchingId == id) detailFetchingId = null
             }
         }
     }
@@ -479,12 +493,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val id = detail.id
         if (id.isNotBlank()) {
             cache.remove(id)
+            detailFetchingId = null
             detail = DetailState()
             openModel(id)
         }
     }
 
     fun closeDetail() {
+        detailJob?.cancel()
+        detailFetchingId = null
         detail = DetailState()
     }
 

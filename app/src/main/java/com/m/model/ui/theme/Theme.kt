@@ -180,3 +180,12 @@ fun MmodelTheme(
         content = content,
     )
 }
+
+/** The single background used by every screen so headings never clash with it. */
+@Composable
+fun appBackgroundBrush(): Brush = Brush.verticalGradient(
+    listOf(
+        MaterialTheme.colorScheme.background,
+        MaterialTheme.colorScheme.surfaceContainerLow,
+    ),
+)

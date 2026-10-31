@@ -3,7 +3,9 @@ package com.m.model.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +91,8 @@ import com.m.model.ui.formatBytes
 import com.m.model.ui.formatContext
 import com.m.model.ui.formatCount
 import com.m.model.ui.formatParams
+import com.m.model.ui.formatTask
+import com.m.model.ui.theme.appBackgroundBrush
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,7 +113,10 @@ fun DetailScreen(
     var pendingDownload by remember(modelId) { mutableStateOf<GgufVariant?>(null) }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(appBackgroundBrush()),
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
@@ -137,8 +145,8 @@ fun DetailScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                 ),
             )
         },
@@ -234,6 +242,16 @@ private val chatPipelines = setOf(
     "text2text-generation",
     "conversational",
 )
+
+private const val CHAT_CONTEXT_CAP = 2_048L
+
+/** Lower is worse, so the worst dimension drives the overall verdict. */
+private fun verdictRank(fit: Fit): Int = when (fit) {
+    Fit.WONT_RUN -> 0
+    Fit.SLOW -> 1
+    Fit.UNKNOWN -> 2
+    Fit.WORKS -> 3
+}
 
 private fun ModelCard.chatPipelineOk(): Boolean {
     val pipeline = model.pipelineTag?.lowercase() ?: return true
@@ -984,6 +1002,43 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
     }
     val modelContext = (card.model.gguf?.contextLength
         ?: card.model.config?.maxPositionEmbeddings)?.takeIf { it > 0L }
+    val contextFit = when {
+        modelContext == null -> Fit.UNKNOWN
+        modelContext >= CHAT_CONTEXT_CAP -> Fit.WORKS
+        modelContext >= 512L -> Fit.SLOW
+        else -> Fit.WONT_RUN
+    }
+    val checks = listOf(
+        "Memory" to memoryFit,
+        "Storage" to storageFit,
+        "Runtime" to runtimeFit,
+        "Context" to contextFit,
+    )
+    val verdictFit = checks.minByOrNull { verdictRank(it.second) }?.second ?: Fit.UNKNOWN
+    val blockers = checks.filter { it.second == Fit.WONT_RUN }.map { it.first }
+    val tight = checks.filter { it.second == Fit.SLOW }.map { it.first }
+    val unknown = checks.filter { it.second == Fit.UNKNOWN }.map { it.first }
+    val bottleneck = when {
+        blockers.isNotEmpty() ->
+            "${blockers.joinToString(" and ")} fall short on this phone."
+
+        tight.isNotEmpty() ->
+            "${tight.joinToString(" and ")} ${if (tight.size == 1) "is" else "are"} tight."
+
+        unknown.isNotEmpty() ->
+            "${unknown.joinToString(" and ")} could not be verified."
+
+        else -> "Every check passes with headroom."
+    }
+    val verdictTitle = when (verdictFit) {
+        Fit.WORKS -> "Runs comfortably"
+        Fit.SLOW -> "Runs, but tight"
+        Fit.WONT_RUN -> "Likely won't run"
+        Fit.UNKNOWN -> "Verdict unknown"
+    }
+    val recommendation = bestVariant?.let {
+        "Best fit · ${it.quant} · ${formatBytes(it.bytes)}"
+    } ?: "No sized GGUF published"
     val memoryFormula = if (card.variants.isNotEmpty()) {
         "1.15× GGUF size + 600 MB overhead"
     } else {
@@ -1023,6 +1078,42 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
                     )
                     Spacer(Modifier.width(4.dp))
                     Text("Recheck")
+                }
+            }
+
+            val (verdictBg, verdictFg) = fitColors(verdictFit)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = verdictBg,
+                contentColor = verdictFg,
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = fitIcon(verdictFit),
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(text = verdictTitle, style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = bottleneck,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = verdictFg.copy(alpha = 0.82f),
+                        )
+                        Text(
+                            text = recommendation,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = verdictFg.copy(alpha = 0.9f),
+                        )
+                    }
                 }
             }
 
@@ -1080,10 +1171,23 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
                 deviceSecondary = "llama.cpp runtime",
                 status = runtimeFit,
             )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ComparisonRow(
+                label = "Context",
+                modelPrimary = if (modelContext != null) formatContext(modelContext) else "Unknown",
+                modelSecondary = if (modelContext != null) {
+                    "Model training window"
+                } else {
+                    "Not published"
+                },
+                devicePrimary = "2K cap",
+                deviceSecondary = "Mmodel chat limit",
+                status = contextFit,
+            )
 
             if (modelContext != null) {
                 Text(
-                    text = "Model context: ${formatContext(modelContext)}. Mmodel caps local chat at 2K tokens to protect memory.",
+                    text = "Model context is ${formatContext(modelContext)}. Mmodel trims prompts to a 2K window to protect memory.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1199,7 +1303,7 @@ private fun ModelDetailsCard(card: ModelCard) {
             card.model.gguf?.contextLength?.let { contextLength ->
                 InfoRow(label = "Context", value = formatContext(contextLength))
             }
-            InfoRow(label = "Task", value = pretty(card.model.pipelineTag))
+            InfoRow(label = "Task", value = formatTask(card.model.pipelineTag))
             InfoRow(label = "Library", value = card.model.library ?: "—")
             InfoRow(label = "Downloads", value = formatCount(card.model.downloads))
             InfoRow(label = "Likes", value = formatCount(card.model.likes))
@@ -1259,18 +1363,13 @@ private fun DeviceCheckCard(device: DeviceSpecs, onRefresh: () -> Unit) {
     }
 }
 
-private fun pretty(value: String?): String {
-    if (value.isNullOrBlank()) return "—"
-    return value
-        .replace('_', ' ')
-        .replace('-', ' ')
-        .replaceFirstChar { it.titlecase() }
-}
-
 private fun openOnHuggingFace(context: Context, modelId: String) {
-    runCatching {
+    val opened = runCatching {
         context.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/$modelId")),
         )
+    }.isSuccess
+    if (!opened) {
+        Toast.makeText(context, "No app can open this link.", Toast.LENGTH_SHORT).show()
     }
 }

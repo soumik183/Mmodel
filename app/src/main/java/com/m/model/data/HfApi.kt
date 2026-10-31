@@ -1,6 +1,7 @@
 package com.m.model.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -8,6 +9,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class HfHttpException(val code: Int) : IOException("Hugging Face HTTP $code")
@@ -72,28 +75,31 @@ class HfApi(
         throw IOException("Hugging Face sent an unreadable response. Try again.", e)
     }
 
-    private fun fetch(url: String): String {
+    /**
+     * Retries transient failures (rate limits, 5xx, dropped connections) with
+     * backoff. Uses [delay] so a retry never blocks the IO thread pool.
+     */
+    private suspend fun fetch(url: String): String {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mmodel/1.4 (Android)")
+            .header("User-Agent", "Mmodel/1.5 (Android)")
             .header("Accept", "application/json")
             .build()
 
         var lastError: IOException? = null
-        for (attempt in 0 until 3) {
+        for (attempt in 0 until MAX_ATTEMPTS) {
             try {
                 client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
-                        return response.body?.string()
-                            ?: throw IOException("Hugging Face returned an empty response.")
+                        val body = response.body?.string()
+                        if (body.isNullOrBlank()) {
+                            throw IOException("Hugging Face returned an empty response.")
+                        }
+                        return body
                     }
 
-                    val retryable = response.code == 429 || response.code in 500..599
-                    if (retryable && attempt < 2) {
-                        val retryAfterMs = response.header("Retry-After")
-                            ?.toLongOrNull()
-                            ?.times(1_000L)
-                        sleepBeforeRetry(attempt, retryAfterMs)
+                    if (isRetryable(response.code) && attempt < MAX_ATTEMPTS - 1) {
+                        retryDelay(attempt, response.header("Retry-After"))
                     } else {
                         throw HfHttpException(response.code)
                     }
@@ -102,19 +108,37 @@ class HfApi(
                 throw e
             } catch (e: IOException) {
                 lastError = e
-                if (attempt >= 2) throw e
-                sleepBeforeRetry(attempt, null)
+                if (attempt >= MAX_ATTEMPTS - 1) throw e
+                retryDelay(attempt, null)
             }
         }
         throw lastError ?: IOException("Hugging Face request failed.")
     }
 
-    private fun sleepBeforeRetry(attempt: Int, retryAfterMs: Long?) {
-        val wait = retryAfterMs ?: (500L shl attempt)
-        try {
-            Thread.sleep(wait.coerceIn(300L, 5_000L))
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        }
+    private fun isRetryable(code: Int): Boolean =
+        code == 408 || code == 429 || code in 500..599
+
+    private suspend fun retryDelay(attempt: Int, retryAfter: String?) {
+        val wait = parseRetryAfterMs(retryAfter) ?: (500L shl attempt)
+        delay(wait.coerceIn(300L, 5_000L))
+    }
+
+    /** Accepts both the numeric-seconds and HTTP-date forms of Retry-After. */
+    private fun parseRetryAfterMs(value: String?): Long? {
+        val trimmed = value?.trim()
+        if (trimmed.isNullOrEmpty()) return null
+        trimmed.toLongOrNull()?.let { return it * 1_000L }
+        return runCatching {
+            val parsed = SimpleDateFormat(
+                "EEE, dd MMM yyyy HH:mm:ss zzz",
+                Locale.US,
+            ).parse(trimmed)
+            if (parsed == null) null
+            else (parsed.time - System.currentTimeMillis()).coerceAtLeast(0L)
+        }.getOrNull()
+    }
+
+    private companion object {
+        const val MAX_ATTEMPTS = 3
     }
 }

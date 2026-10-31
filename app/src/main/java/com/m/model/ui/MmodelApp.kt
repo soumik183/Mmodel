@@ -3,20 +3,18 @@ package com.m.model.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,7 +25,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,6 +46,7 @@ import com.m.model.ui.screens.ChatScreen
 import com.m.model.ui.screens.DetailScreen
 import com.m.model.ui.screens.DownloadsScreen
 import com.m.model.ui.screens.HomeScreen
+import com.m.model.ui.theme.appBackgroundBrush
 
 private data class AppTab(val icon: ImageVector, val label: String)
 
@@ -64,6 +61,10 @@ private val appTabs = listOf(
 fun MmodelApp(vm: MainViewModel = viewModel()) {
     var tab by rememberSaveable { mutableStateOf(0) }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Hoisted so Explore and Home keep their scroll position when a model detail opens.
+    val browseListState = rememberLazyListState()
+    val homeListState = rememberLazyListState()
 
     val closeDetail: () -> Unit = {
         detailId = null
@@ -96,14 +97,7 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.background,
-                            MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
-                    ),
-                ),
+                .background(appBackgroundBrush()),
         ) {
             Scaffold(
                 containerColor = Color.Transparent,
@@ -121,20 +115,31 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
                     0 -> HomeScreen(
                         vm = vm,
                         modifier = Modifier.padding(padding),
-                        onOpenModel = { detailId = it },
+                        onOpenModel = { id ->
+                            vm.openModel(id)
+                            detailId = id
+                        },
                         onExplore = { tab = 1 },
+                        listState = homeListState,
                     )
 
                     1 -> BrowseScreen(
                         vm = vm,
                         modifier = Modifier.padding(padding),
-                        onOpenModel = { detailId = it },
+                        onOpenModel = { id ->
+                            vm.openModel(id)
+                            detailId = id
+                        },
+                        listState = browseListState,
                     )
 
                     2 -> DownloadsScreen(
                         vm = vm,
                         modifier = Modifier.padding(padding),
-                        onOpenModel = { detailId = it },
+                        onOpenModel = { id ->
+                            vm.openModel(id)
+                            detailId = id
+                        },
                         onChat = { recordId ->
                             vm.openChatFor(recordId)
                             tab = 3
@@ -153,96 +158,75 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
     }
 }
 
+/**
+ * Fully transparent bar: only the active pill and the icons are drawn, so the
+ * screen background stays visible underneath.
+ */
 @Composable
 private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val shape = RoundedCornerShape(30.dp)
-    val glass = Brush.horizontalGradient(
-        listOf(
-            MaterialTheme.colorScheme.surface.copy(alpha = if (dark) 0.72f else 0.82f),
-            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = if (dark) 0.62f else 0.72f),
-            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (dark) 0.28f else 0.36f),
-        ),
-    )
-
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        shape = shape,
-        color = Color.Transparent,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (dark) 0.42f else 0.55f),
-        ),
-        shadowElevation = 14.dp,
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(66.dp)
-                .clip(shape)
-                .background(glass)
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            appTabs.forEachIndexed { index, item ->
-                val active = selected == index
-                val background by animateColorAsState(
-                    targetValue = if (active) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        Color.Transparent
-                    },
-                    label = "navBackground",
-                )
-                val content by animateColorAsState(
-                    targetValue = if (active) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    label = "navContent",
-                )
-                val iconScale by animateFloatAsState(
-                    targetValue = if (active) 1f else 0.9f,
-                    label = "navIconScale",
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(24.dp))
-                        .selectable(
-                            selected = active,
-                            onClick = { onSelect(index) },
-                            role = Role.Tab,
-                        )
-                        .background(background),
-                    contentAlignment = Alignment.Center,
+        appTabs.forEachIndexed { index, item ->
+            val active = selected == index
+            val background by animateColorAsState(
+                targetValue = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.Transparent
+                },
+                label = "navBackground",
+            )
+            val content by animateColorAsState(
+                targetValue = if (active) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                label = "navContent",
+            )
+            val iconScale by animateFloatAsState(
+                targetValue = if (active) 1f else 0.9f,
+                label = "navIconScale",
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(background)
+                    .selectable(
+                        selected = active,
+                        onClick = { onSelect(index) },
+                        role = Role.Tab,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(20.dp)
-                                .graphicsLayer {
-                                    scaleX = iconScale
-                                    scaleY = iconScale
-                                },
-                            tint = content,
-                        )
-                        Text(
-                            text = item.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = content,
-                        )
-                    }
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .graphicsLayer {
+                                scaleX = iconScale
+                                scaleY = iconScale
+                            },
+                        tint = content,
+                    )
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = content,
+                    )
                 }
             }
         }
