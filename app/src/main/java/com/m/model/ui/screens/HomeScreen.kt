@@ -191,7 +191,11 @@ private fun BrandHeader() {
         BrandMark(size = 46.dp)
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "Mmodel", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                text = "Mmodel",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
             Text(
                 text = "LOCAL AI · ANDROID",
                 style = MaterialTheme.typography.labelSmall,

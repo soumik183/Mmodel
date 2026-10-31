@@ -29,11 +29,13 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.StopCircle
@@ -56,15 +58,19 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -83,6 +89,7 @@ import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.SectionHeader
 import com.m.model.ui.formatBytes
 import com.m.model.ui.formatContext
+import kotlinx.coroutines.launch
 
 @Composable
 fun ChatScreen(
@@ -112,6 +119,14 @@ fun ChatScreen(
             if (lastVisible >= state.messages.lastIndex - 1) {
                 listState.scrollToItem(state.messages.lastIndex)
             }
+        }
+    }
+    val scope = rememberCoroutineScope()
+    val atBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            info.totalItemsCount == 0 || lastVisible >= info.totalItemsCount - 1
         }
     }
 
@@ -203,20 +218,46 @@ fun ChatScreen(
                             modifier = Modifier.weight(1f),
                         )
                     } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            items(
-                                items = state.messages,
-                                key = { it.id },
-                                contentType = { "message" },
-                            ) { message ->
-                                ChatBubble(message = message)
+                        Box(modifier = Modifier.weight(1f)) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                items(
+                                    items = state.messages,
+                                    key = { it.id },
+                                    contentType = { "message" },
+                                ) { message ->
+                                    ChatBubble(
+                                        message = message,
+                                        canRegenerate = message.role == ChatRole.ASSISTANT &&
+                                            !message.streaming &&
+                                            !state.generating &&
+                                            message.id == state.messages.lastOrNull()?.id,
+                                        onRegenerate = vm::regenerate,
+                                    )
+                                }
+                                item { Spacer(Modifier.height(4.dp)) }
                             }
-                            item { Spacer(Modifier.height(4.dp)) }
+                            if (!atBottom) {
+                                FilledIconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            listState.animateScrollToItem(state.messages.size)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(end = 16.dp, bottom = 12.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                                        contentDescription = "Scroll to latest",
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -272,7 +313,11 @@ private fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = "Chat", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    text = "Chat",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
                 Text(
                     text = "Private inference on this phone",
                     style = MaterialTheme.typography.bodySmall,
@@ -830,7 +875,12 @@ private fun Suggestion(text: String, onClick: (String) -> Unit) {
 }
 
 @Composable
-private fun ChatBubble(message: ChatMessage) {
+private fun ChatBubble(
+    message: ChatMessage,
+    canRegenerate: Boolean,
+    onRegenerate: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
     val user = message.role == ChatRole.USER
     val shape = if (user) {
         RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomEnd = 8.dp, bottomStart = 22.dp)
@@ -849,41 +899,90 @@ private fun ChatBubble(message: ChatMessage) {
     }
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        Surface(
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.88f)
+                .fillMaxWidth(0.9f)
                 .align(if (user) Alignment.CenterEnd else Alignment.CenterStart),
-            shape = shape,
-            color = color,
-            contentColor = content,
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = shape,
+                color = color,
+                contentColor = content,
             ) {
-                Text(
-                    text = if (user) "You" else "Mmodel",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = content.copy(alpha = 0.82f),
-                )
-                SelectionContainer {
-                    Text(
-                        text = when {
-                            message.streaming && message.text.isBlank() -> "Thinking…"
-                            message.streaming -> message.text + "▍"
-                            message.text.isBlank() -> "Stopped."
-                            else -> message.text
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (!user) {
+                            Icon(
+                                imageVector = Icons.Rounded.SmartToy,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        Text(
+                            text = if (user) "You" else "Mmodel",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = content.copy(alpha = 0.82f),
+                        )
+                    }
+                    SelectionContainer {
+                        Text(
+                            text = when {
+                                message.streaming && message.text.isBlank() -> "Thinking…"
+                                message.streaming -> message.text + "▍"
+                                message.text.isBlank() -> "Stopped."
+                                else -> message.text
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    message.meta?.let { meta ->
+                        Text(
+                            text = meta,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = content.copy(alpha = 0.8f),
+                        )
+                    }
                 }
-                message.meta?.let { meta ->
-                    Text(
-                        text = meta,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = content.copy(alpha = 0.8f),
-                    )
+            }
+
+            if (!message.streaming && message.text.isNotBlank()) {
+                Row(
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(
+                        onClick = { clipboard.setText(AnnotatedString(message.text)) },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ContentCopy,
+                            contentDescription = "Copy message",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (canRegenerate) {
+                        IconButton(
+                            onClick = onRegenerate,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Regenerate answer",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }

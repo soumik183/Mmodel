@@ -568,26 +568,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val record = withContext(Dispatchers.IO) {
-                    val resolver = getApplication<Application>().contentResolver
-                    val name = queryDisplayName(uri)
-                    require(name.endsWith(".gguf", ignoreCase = true)) {
-                        "Choose a .gguf model file."
+                    // The header is the source of truth, so a valid GGUF is accepted
+                    // even when the provider hides or mangles the file name.
+                    val version = ggufVersion(uri)
+                    require(version != null) {
+                        "This file is not a GGUF model. Pick a .gguf file exported by llama.cpp."
                     }
-                    require(!SHARD_NAME.containsMatchIn(name)) {
-                        "Sharded GGUFs cannot be loaded from storage. Pick a single-file model."
+                    require(version >= 2) {
+                        "This GGUF is too old (version $version). Re-export it with a newer tool."
                     }
-                    require(hasGgufHeader(uri)) {
-                        "This file is not a valid GGUF model."
+
+                    val rawName = queryDisplayName(uri)
+                    require(!SHARD_NAME.containsMatchIn(rawName)) {
+                        "This is one part of a split model. Import a single-file GGUF instead."
                     }
+                    val displayName = rawName
+                        .substringAfterLast('/')
+                        .ifBlank { "imported-model.gguf" }
+                        .let { if (it.endsWith(".gguf", ignoreCase = true)) it else "$it.gguf" }
 
                     // Keep access across restarts when the provider allows it.
                     runCatching {
-                        resolver.takePersistableUriPermission(
+                        getApplication<Application>().contentResolver.takePersistableUriPermission(
                             uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION,
                         )
                     }
-                    downloadsStore.addImported(uri, name, queryFileSize(uri))
+                    downloadsStore.addImported(uri, displayName, queryFileSize(uri))
                 }
                 downloadNotice = "Imported ${record.modelName}. Open it in Chat or Downloads."
             } catch (e: IllegalArgumentException) {
@@ -599,42 +606,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun queryDisplayName(uri: Uri): String {
-        val resolver = getApplication<Application>().contentResolver
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    cursor.getString(0)?.takeIf { it.isNotBlank() }?.let { return it }
+        runCatching {
+            getApplication<Application>().contentResolver
+                .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getString(0)?.takeIf { it.isNotBlank() }?.let { return it }
+                    }
                 }
-            }
+        }
         return uri.lastPathSegment
             ?.substringAfterLast('/')
-            ?.takeIf { it.isNotBlank() }
-            ?: "Imported model.gguf"
+            ?.takeIf { it.isNotBlank() && it.contains('.') }
+            ?: "imported-model.gguf"
     }
 
     private fun queryFileSize(uri: Uri): Long {
         val resolver = getApplication<Application>().contentResolver
-        resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
-            ?.use { cursor ->
-                if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0)
-            }
+        runCatching {
+            resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0)
+                }
+        }
         return runCatching {
             resolver.openFileDescriptor(uri, "r")?.use { it.statSize }
         }.getOrNull()?.takeIf { it > 0L } ?: 0L
     }
 
-    private fun hasGgufHeader(uri: Uri): Boolean = runCatching {
+    /** Reads the GGUF magic and little-endian version, or null when it is not a GGUF. */
+    private fun ggufVersion(uri: Uri): Int? = runCatching {
         getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
-            val header = ByteArray(4)
+            val header = ByteArray(8)
             var read = 0
             while (read < header.size) {
                 val count = input.read(header, read, header.size - read)
-                if (count <= 0) return@use false
+                if (count <= 0) return@use null
                 read += count
             }
-            header.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46))
-        } ?: false
-    }.getOrDefault(false)
+            if (!header.copyOfRange(0, 4).contentEquals("GGUF".toByteArray(Charsets.US_ASCII))) {
+                return@use null
+            }
+            (header[4].toInt() and 0xFF) or
+                ((header[5].toInt() and 0xFF) shl 8) or
+                ((header[6].toInt() and 0xFF) shl 16) or
+                ((header[7].toInt() and 0xFF) shl 24)
+        }
+    }.getOrNull()
 
     fun downloadFreeBytes(): Long = downloadsStore.freeBytes()
 
@@ -671,7 +689,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "Local chat needs a 64-bit ARM phone. This device cannot load the engine."
 
             record.files.size > 1 ->
-                "Chat currently supports single-file GGUFs. This download has ${record.files.size} shards."
+                SPLIT_UNSUPPORTED
 
             else -> null
         }
@@ -707,7 +725,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (record.files.size > 1) {
             _chat.update {
-                it.copy(error = "Chat currently supports single-file GGUFs. Download a single-file quant.")
+                it.copy(error = SPLIT_UNSUPPORTED)
             }
             return
         }
@@ -798,7 +816,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val record = downloadsStore.records.value.firstOrNull { it.id == state.recordId } ?: return
         if (record.files.size > 1) {
-            _chat.update { it.copy(error = "Chat supports single-file GGUFs only.") }
+            _chat.update { it.copy(error = SPLIT_UNSUPPORTED) }
             return
         }
 
@@ -820,9 +838,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        runGeneration(record, assistantId)
+    }
+
+    /** Answers the most recent question again without typing it a second time. */
+    fun regenerate() {
+        val state = _chat.value
+        if (!state.ready || state.generating || state.loadingModel) return
+        val record = downloadsStore.records.value.firstOrNull { it.id == state.recordId } ?: return
+        if (record.files.size > 1) {
+            _chat.update { it.copy(error = SPLIT_UNSUPPORTED) }
+            return
+        }
+        val lastUser = state.messages.lastOrNull { it.role == ChatRole.USER } ?: return
+        val kept = state.messages.takeWhile { it.id != lastUser.id } + lastUser
+        val assistantId = nextId()
+        _chat.update {
+            it.copy(
+                messages = kept + ChatMessage(
+                    id = assistantId,
+                    role = ChatRole.ASSISTANT,
+                    text = "",
+                    streaming = true,
+                ),
+                generating = true,
+                stopping = false,
+                error = null,
+                status = null,
+            )
+        }
+
+        runGeneration(record, assistantId)
+    }
+
+    private fun runGeneration(record: DownloadRecord, assistantId: Long) {
         val generation = ++generationId
         viewModelScope.launch {
-            val contextLength = state.contextLength.coerceAtLeast(512)
+            val contextLength = _chat.value.contextLength.coerceAtLeast(512)
             val history = _chat.value.messages
                 .filter { it.id != assistantId && it.text.isNotBlank() }
                 .map {
@@ -1056,6 +1108,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val KEY_LAST_MODEL = "last_model"
         const val PAGE_SIZE = 20
+        const val SPLIT_UNSUPPORTED =
+            "Split GGUFs (multiple files) can't run on this phone's engine. Pick a single-file quant."
         val SHARD_NAME = Regex("""-\d{5}-of-\d{5}\.gguf$""", RegexOption.IGNORE_CASE)
     }
 }

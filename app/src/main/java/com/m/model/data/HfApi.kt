@@ -82,7 +82,7 @@ class HfApi(
     private suspend fun fetch(url: String): String {
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mmodel/1.5 (Android)")
+            .header("User-Agent", "Mmodel/1.6 (Android)")
             .header("Accept", "application/json")
             .build()
 

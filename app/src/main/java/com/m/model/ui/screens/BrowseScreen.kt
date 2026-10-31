@@ -110,6 +110,7 @@ fun BrowseScreen(
                     Text(
                         text = "Explore",
                         style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onBackground,
                     )
                     Text(
                         text = when {

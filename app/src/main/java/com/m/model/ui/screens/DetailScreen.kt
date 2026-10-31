@@ -117,11 +117,13 @@ fun DetailScreen(
             .fillMaxSize()
             .background(appBackgroundBrush()),
         containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         text = card?.name ?: "Model details",
+                        color = MaterialTheme.colorScheme.onBackground,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -147,6 +149,9 @@ fun DetailScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent,
                     scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.onBackground,
                 ),
             )
         },
@@ -414,6 +419,7 @@ private fun DetailContent(
                     Text(
                         text = card.name,
                         style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onBackground,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -634,6 +640,13 @@ private fun VariantCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (variant.sharded) {
+                        Text(
+                            text = "Split model · downloads, but this phone's engine runs single-file GGUFs only.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                 }
                 FitBadge(fit = shownFit)
             }

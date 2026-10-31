@@ -24,8 +24,8 @@ android {
         applicationId = "com.m.model"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 7
+        versionName = "1.6"
 
         ndk {
             // The llama.cpp runtime ships arm64-v8a only.

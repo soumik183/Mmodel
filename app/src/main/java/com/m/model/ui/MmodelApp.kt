@@ -100,7 +100,10 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
                 .background(appBackgroundBrush()),
         ) {
             Scaffold(
+                // Transparent container must still provide a content color, or the
+                // headings fall back to the black default and vanish in dark mode.
                 containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onBackground,
                 bottomBar = {
                     MmodelBottomBar(
                         selected = tab,

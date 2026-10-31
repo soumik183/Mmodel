@@ -153,14 +153,17 @@ class DownloadStore(context: Context) {
     }.getOrDefault(0L)
 
     fun addImported(uri: Uri, displayName: String, bytes: Long): DownloadRecord {
-        val safeName = displayName.substringAfterLast('/').ifBlank { "Imported model.gguf" }
+        val safeName = displayName.substringAfterLast('/').ifBlank { "imported-model.gguf" }
         val id = "local|$uri|$safeName"
         _records.value.firstOrNull { it.id == id }?.let { return it }
 
         val record = DownloadRecord(
             id = id,
             modelId = "local/$safeName",
-            modelName = safeName.dropLast(5).ifBlank { "Imported model" },
+            modelName = safeName
+                .removeSuffix(".gguf")
+                .removeSuffix(".GGUF")
+                .ifBlank { "Imported model" },
             quant = "Imported",
             dirPath = "",
             files = listOf(
@@ -353,7 +356,7 @@ class DownloadStore(context: Context) {
 
         val requestBuilder = Request.Builder()
             .url(resolveUrl(record.modelId, file.remoteName))
-            .header("User-Agent", "Mmodel/1.5 (Android)")
+            .header("User-Agent", "Mmodel/1.6 (Android)")
             .header("Accept-Encoding", "identity")
         if (existing > 0 && (file.bytesTotal <= 0L || existing < file.bytesTotal)) {
             requestBuilder.header("Range", "bytes=$existing-")
