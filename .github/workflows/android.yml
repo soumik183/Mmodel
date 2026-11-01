@@ -91,26 +91,48 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Publish rolling latest release
+      - name: Publish releases
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION="$(grep -m1 'versionName = ' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')"
+          VERSION_CODE="$(grep -m1 'versionCode = ' app/build.gradle.kts | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+          test -n "$VERSION"
+          test -n "$VERSION_CODE"
+
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
             APK=app/build/outputs/apk/release/app-release.apk
             ASSET=app-release.apk
-            NOTES="Signed Mmodel 1.4 release build from $GITHUB_SHA."
+            KIND="signed release"
           else
             APK=app/build/outputs/apk/debug/app-debug.apk
             ASSET=app-debug.apk
-            NOTES="Debug Mmodel 1.4 build from $GITHUB_SHA. Add signing secrets to publish a signed release."
+            KIND="debug"
           fi
 
           cp "$APK" "$RUNNER_TEMP/$ASSET"
-          gh release view latest > /dev/null 2>&1 || \
-            gh release create latest --title "Mmodel latest APK" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
-          gh release upload latest "$RUNNER_TEMP/$ASSET" --clobber
+          NOTES="$(printf 'Mmodel %s (versionCode %s) %s build.\n\nCommit: %s\nInstall: download the APK and allow installs from unknown sources.\nRequires a 64-bit ARM Android 8.0+ phone.' "$VERSION" "$VERSION_CODE" "$KIND" "$GITHUB_SHA")"
 
+          TAG="v$VERSION"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; refreshing its APK."
+          else
+            gh release create "$TAG" --title "Mmodel $VERSION" --notes "$NOTES" --target "$GITHUB_SHA"
+          fi
+          gh release upload "$TAG" "$RUNNER_TEMP/$ASSET" --clobber
+          if [ "$ASSET" = "app-release.apk" ]; then
+            gh release delete-asset "$TAG" app-debug.apk --yes || true
+          fi
+
+          # Rolling "latest" tag keeps a stable download URL for the README.
+          if gh release view latest > /dev/null 2>&1; then
+            gh release edit latest --title "Mmodel $VERSION latest APK" --notes "$NOTES"
+          else
+            gh release create latest --title "Mmodel $VERSION latest APK" --notes "$NOTES" \
+              --prerelease --target "$GITHUB_SHA"
+          fi
+          gh release upload latest "$RUNNER_TEMP/$ASSET" --clobber
           if [ "$ASSET" = "app-release.apk" ]; then
             gh release delete-asset latest app-debug.apk --yes || true
           fi
