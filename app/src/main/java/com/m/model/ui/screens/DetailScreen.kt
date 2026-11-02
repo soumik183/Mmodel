@@ -558,7 +558,7 @@ private fun DetailContent(
 
         item {
             Text(
-                text = "Fit uses actual Hugging Face file sizes and this phone's live memory and storage. RAM is estimated at 1.15× the quant size plus 600 MB overhead, compared with a safe budget of min(75% of total RAM, total RAM − 1.5 GB). Context size, runtime and background apps can change the result.",
+                text = "Fit uses actual Hugging Face file sizes and this phone's live memory and storage. RAM is estimated at 1.15× the quant size plus 350 MB of runtime buffers and 125 MB per 1K tokens of context, compared with a safe budget of min(75% of total RAM, total RAM − 1.5 GB). A model that fits the budget but not the RAM free right now is downgraded to tight. Context size, runtime and background apps can change the result.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -932,6 +932,14 @@ private fun FitCard(card: ModelCard, device: DeviceSpecs) {
                 }
             }
 
+            if (card.fit.availableRamShortfallBytes > 0L) {
+                Text(
+                    text = "Only ${formatBytes(device.availableRamBytes)} is free right now — " +
+                        "close a few apps to free ~${formatBytes(card.fit.availableRamShortfallBytes)} more before loading.",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+
             if (bestVariant != null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -987,7 +995,11 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
     val bestVariant = card.bestVariant
     val downloadBytes = card.downloadBytes
     val needsRam = card.fit.estimatedRamBytes
-    val memoryFit = ModelFit.memoryFit(needsRam, device.inferenceBudgetBytes)
+    val memoryFit = ModelFit.memoryFit(
+        needsRam,
+        device.inferenceBudgetBytes,
+        device.availableRamBytes,
+    )
     val storageFits = ModelFit.storageFits(downloadBytes, device.freeStorageBytes)
     val storageFit = when (storageFits) {
         true -> Fit.WORKS
@@ -1054,9 +1066,9 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
         "Best fit · ${it.quant} · ${formatBytes(it.bytes)}"
     } ?: "No sized GGUF published"
     val memoryFormula = if (card.variants.isNotEmpty()) {
-        "1.15× GGUF size + 600 MB overhead"
+        "1.15× GGUF size + 350 MB runtime + 125 MB per 1K context"
     } else {
-        "1.2× weight size + 900 MB overhead"
+        "1.2× weight size + 600 MB runtime + 150 MB per 1K context"
     }
 
     Surface(
@@ -1154,7 +1166,8 @@ private fun ComparisonCard(card: ModelCard, device: DeviceSpecs, onRefresh: () -
                 modelPrimary = needsRam?.let { "${formatBytes(it)} RAM" } ?: "Unknown",
                 modelSecondary = if (needsRam != null) "Estimated at load" else "No file size published",
                 devicePrimary = "${formatBytes(device.inferenceBudgetBytes)} safe",
-                deviceSecondary = "of ${formatBytes(device.totalRamBytes)} physical RAM",
+                deviceSecondary = "${formatBytes(device.availableRamBytes)} free now · " +
+                    "of ${formatBytes(device.totalRamBytes)} physical",
                 status = memoryFit,
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

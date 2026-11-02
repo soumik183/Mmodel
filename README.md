@@ -110,15 +110,24 @@ Or open the [latest release page](https://github.com/soumik183/Mmodel/releases/l
    summed; projector, LoRA, importance-matrix, MTP and tokenizer helper files are ignored. For
    non-GGUF repos, safetensors / PyTorch / ONNX weight sizes are summed.
 2. Present one download option per quantization with its own fit badge.
-3. Estimate runtime RAM: `file size × 1.15 + 600 MB` (GGUF) or `file size × 1.2 + 900 MB`
-   (other formats), to leave room for the KV cache and runtime.
+3. Estimate runtime RAM: `file size × 1.15 + 350 MB runtime + 125 MB per 1K context tokens`
+   (GGUF) or `file size × 1.2 + 600 MB runtime + 150 MB per 1K tokens` (other formats). At the
+   2K chat cap this is the same 600 MB / 900 MB allowance, but a larger context now scales instead
+   of silently underestimating.
 4. Compare with a safe budget: `min(total RAM − 1.5 GB, 75% of total RAM)`.
    - `≤ 65%` of budget → **Works**
    - `≤ 100%` → **Slow**
    - `> 100%` → **Won't run**
-5. If the download plus 300 MB does not fit in free storage → **Won't run**.
-6. The model screen repeats the exact comparison: estimated RAM vs the safe budget, download size vs
-   free storage (including the 300 MB reserve), and GGUF layout vs the arm64 llama.cpp runtime.
+5. If a model fits the budget but not the RAM free right now (90% headroom), the verdict is
+   downgraded to **Slow** and the exact shortfall is shown, so "Works" reflects the phone as it is
+   running, not just what it could theoretically give an app.
+6. When several quants are published, the smallest **single-file** quant is picked as the best
+   download, because chat cannot load a sharded GGUF; a smaller shard set no longer wins.
+7. If the download plus 300 MB does not fit in free storage → **Won't run**, with the exact missing
+   bytes reported.
+8. The model screen repeats the exact comparison: estimated RAM vs the safe budget and free RAM,
+   download size vs free storage (including the 300 MB reserve), and GGUF layout vs the arm64
+   llama.cpp runtime.
    Context is shown alongside the app's 2K local-chat cap.
 7. The device card shows live RAM and storage and has a **Recheck** action.
 

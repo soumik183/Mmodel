@@ -771,6 +771,8 @@ private fun LoadModelPane(
                             "Chat needs a single-file GGUF. This download has ${record.files.size} shards."
                         fit.fit == Fit.WONT_RUN ->
                             "This model needs more RAM than this phone can safely give an app. Choose a smaller quant."
+                        fit.availableRamShortfallBytes > 0L ->
+                            "Only ${formatBytes(device.availableRamBytes)} is free right now. Close other apps to free about ${formatBytes(fit.availableRamShortfallBytes)} more for a smoother run."
                         fit.fit == Fit.SLOW ->
                             "This is close to the memory limit. Responses may be slow."
                         else -> null

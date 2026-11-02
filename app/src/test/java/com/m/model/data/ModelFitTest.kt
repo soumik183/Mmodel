@@ -207,6 +207,54 @@ class ModelFitTest {
         assertEquals(0L, card.variants.last().bytes)
     }
 
+    @Test
+    fun bestVariantPrefersALoadableSingleFileOverASmallerShardSet() {
+        val card = ModelFit.analyze(
+            HfModel(
+                id = "org/model",
+                siblings = listOf(
+                    HfSibling(rfilename = "model-Q2_K-00001-of-00002.gguf", size = 400_000_000L),
+                    HfSibling(rfilename = "model-Q2_K-00002-of-00002.gguf", size = 400_000_000L),
+                    HfSibling(rfilename = "model-Q4_K_M.gguf", size = 900_000_000L),
+                ),
+            ),
+            device,
+        )
+
+        assertEquals(900_000_000L, card.downloadBytes)
+        assertEquals("Q4_K_M", card.bestVariant?.quant)
+        assertTrue(card.bestVariant!!.sharded.not())
+    }
+
+    @Test
+    fun ramEstimateGrowsWithContext() {
+        val small = ModelFit.estimateRamBytes(1_000_000_000L, contextTokens = 2_048)
+        val large = ModelFit.estimateRamBytes(1_000_000_000L, contextTokens = 8_192)
+
+        assertTrue(large > small)
+    }
+
+    @Test
+    fun tightAvailableRamDowngradesWorksToSlow() {
+        val tight = device.copy(availableRamBytes = 1_000_000_000L)
+        val card = ModelFit.analyze(model("model-q4.gguf" to 500_000_000L), tight)
+
+        assertEquals(Fit.SLOW, card.fit.fit)
+        assertTrue(card.fit.availableRamShortfallBytes > 0L)
+    }
+
+    @Test
+    fun storageShortfallIsReportedInBytes() {
+        val lowStorage = device.copy(freeStorageBytes = 1_000_000_000L)
+        val card = ModelFit.analyze(model("model-q4.gguf" to 900_000_000L), lowStorage)
+
+        assertTrue(card.fit.storageBlocked)
+        assertEquals(
+            900_000_000L + ModelFit.STORAGE_RESERVE_BYTES - 1_000_000_000L,
+            card.fit.storageShortfallBytes,
+        )
+    }
+
     private fun model(vararg files: Pair<String, Long>): HfModel = HfModel(
         id = "org/model",
         author = "org",

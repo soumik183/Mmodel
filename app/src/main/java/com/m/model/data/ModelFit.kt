@@ -10,6 +10,10 @@ data class FitResult(
     val estimatedRamBytes: Long?,
     val ratio: Float,
     val storageBlocked: Boolean = false,
+    /** How much free RAM is missing right now, for the "close apps" hint. */
+    val availableRamShortfallBytes: Long = 0L,
+    /** Exact storage gap including the reserve, for the detail screen. */
+    val storageShortfallBytes: Long = 0L,
 )
 
 @Immutable
@@ -43,12 +47,29 @@ data class ModelCard(
     val id: String get() = model.id
     val name: String get() = model.id.substringAfterLast('/').ifBlank { model.id }
     val author: String get() = model.author ?: model.id.substringBefore('/', "")
-    val bestVariant: GgufVariant? get() = variants.filter { it.bytes > 0L }.minByOrNull { it.bytes }
+    /** Smallest quant that can actually be loaded, single-file first. */
+    val bestVariant: GgufVariant? get() = variants
+        .filter { it.bytes > 0L }
+        .minWithOrNull(compareBy({ it.sharded }, { it.bytes }))
 }
 
 object ModelFit {
     private const val MB = 1_000_000L
     const val STORAGE_RESERVE_BYTES = 300_000_000L
+
+    /** Every model is loaded with this context, so fit assumes it. */
+    const val CHAT_CONTEXT_TOKENS = 2_048
+
+    private const val GGUF_WEIGHT_FACTOR = 1.15
+    private const val OTHER_WEIGHT_FACTOR = 1.20
+    private const val GGUF_RUNTIME_BASE = 350L * MB
+    private const val OTHER_RUNTIME_BASE = 600L * MB
+    private const val GGUF_KV_PER_K_TOKENS = 125L * MB
+    private const val OTHER_KV_PER_K_TOKENS = 150L * MB
+
+    /** Verdicts flip to "slow" below this share of currently free RAM. */
+    private const val AVAILABLE_RAM_HEADROOM = 0.9f
+
     private val AUXILIARY_GGUF = listOf(
         "mmproj",
         "projector",
@@ -72,7 +93,9 @@ object ModelFit {
 
     fun analyze(model: HfModel, device: DeviceSpecs): ModelCard {
         val variants = ggufVariants(model, device)
-        val best = variants.filter { it.bytes > 0L }.minByOrNull { it.bytes }
+        val best = variants
+            .filter { it.bytes > 0L }
+            .minWithOrNull(compareBy({ it.sharded }, { it.bytes }))
         val otherWeights = otherWeightBytes(model)
         val downloadBytes = best?.bytes ?: if (variants.isEmpty()) otherWeights else null
 
@@ -99,57 +122,109 @@ object ModelFit {
     /**
      * Fit for a whole variant, including the space the download needs.
      */
-    fun fitFor(fileBytes: Long?, device: DeviceSpecs, isGguf: Boolean = true): FitResult {
+    fun fitFor(
+        fileBytes: Long?,
+        device: DeviceSpecs,
+        isGguf: Boolean = true,
+        contextTokens: Int = CHAT_CONTEXT_TOKENS,
+    ): FitResult {
         if (fileBytes == null || fileBytes <= 0L) {
             return FitResult(Fit.UNKNOWN, null, 0f)
         }
 
-        val needsRam = estimateRamBytes(fileBytes, isGguf)
+        val needsRam = estimateRamBytes(fileBytes, isGguf, contextTokens)
         val budget = device.inferenceBudgetBytes
-        val storageBlocked = storageFits(fileBytes, device.freeStorageBytes) == false
+        val storageShortfall = storageShortfallBytes(fileBytes, device.freeStorageBytes)
+        val storageBlocked = storageShortfall > 0L
         val ratio = if (budget > 0L) needsRam.toFloat() / budget else 0f
-        val fit = if (storageBlocked) Fit.WONT_RUN else memoryFit(needsRam, budget)
+        val fit = if (storageBlocked) {
+            Fit.WONT_RUN
+        } else {
+            memoryFit(needsRam, budget, device.availableRamBytes)
+        }
 
-        return FitResult(fit, needsRam, ratio, storageBlocked)
+        return FitResult(
+            fit = fit,
+            estimatedRamBytes = needsRam,
+            ratio = ratio,
+            storageBlocked = storageBlocked,
+            availableRamShortfallBytes = availableRamShortfall(needsRam, device.availableRamBytes),
+            storageShortfallBytes = storageShortfall,
+        )
     }
 
     /** The memory part of the verdict, independent of download space. */
-    fun memoryFit(estimatedRamBytes: Long?, budgetBytes: Long): Fit {
+    fun memoryFit(
+        estimatedRamBytes: Long?,
+        budgetBytes: Long,
+        availableRamBytes: Long = 0L,
+    ): Fit {
         if (estimatedRamBytes == null || estimatedRamBytes <= 0L) return Fit.UNKNOWN
         if (budgetBytes <= 0L) return Fit.WONT_RUN
         val ratio = estimatedRamBytes.toFloat() / budgetBytes
-        return when {
+        val byBudget = when {
             ratio <= 0.65f -> Fit.WORKS
             ratio <= 1f -> Fit.SLOW
             else -> Fit.WONT_RUN
         }
+        // The budget is what Android could give us; free RAM right now is what
+        // the model actually gets. Never upgrade, only warn when it is tight.
+        val tightNow = byBudget == Fit.WORKS &&
+            availableRamBytes > 0L &&
+            estimatedRamBytes > availableRamBytes * AVAILABLE_RAM_HEADROOM
+        return if (tightNow) Fit.SLOW else byBudget
     }
 
     /** The storage part of the verdict, independent of memory. */
     fun storageFits(fileBytes: Long?, freeStorageBytes: Long): Boolean? {
         if (fileBytes == null || fileBytes <= 0L) return null
-        return fileBytes + STORAGE_RESERVE_BYTES <= freeStorageBytes
+        return storageShortfallBytes(fileBytes, freeStorageBytes) == 0L
     }
+
+    /** Bytes still missing before the download plus the reserve fits. */
+    fun storageShortfallBytes(fileBytes: Long?, freeStorageBytes: Long): Long {
+        if (fileBytes == null || fileBytes <= 0L) return 0L
+        return (fileBytes + STORAGE_RESERVE_BYTES - freeStorageBytes).coerceAtLeast(0L)
+    }
+
+    private fun availableRamShortfall(needsRam: Long, availableRamBytes: Long): Long =
+        if (availableRamBytes <= 0L) 0L else (needsRam - availableRamBytes).coerceAtLeast(0L)
 
     /**
      * Memory-only fit, used after a model has already been downloaded.
      */
-    fun ramFit(fileBytes: Long?, device: DeviceSpecs): FitResult {
+    fun ramFit(fileBytes: Long?, device: DeviceSpecs, contextTokens: Int = CHAT_CONTEXT_TOKENS): FitResult {
         if (fileBytes == null || fileBytes <= 0L) {
             return FitResult(Fit.UNKNOWN, null, 0f)
         }
 
-        val needsRam = estimateRamBytes(fileBytes, isGguf = true)
+        val needsRam = estimateRamBytes(fileBytes, isGguf = true, contextTokens = contextTokens)
         val budget = device.inferenceBudgetBytes
         val ratio = if (budget > 0L) needsRam.toFloat() / budget else 0f
-        val fit = memoryFit(needsRam, budget)
-        return FitResult(fit, needsRam, ratio)
+        val fit = memoryFit(needsRam, budget, device.availableRamBytes)
+        return FitResult(
+            fit = fit,
+            estimatedRamBytes = needsRam,
+            ratio = ratio,
+            availableRamShortfallBytes = availableRamShortfall(needsRam, device.availableRamBytes),
+        )
     }
 
-    fun estimateRamBytes(fileBytes: Long, isGguf: Boolean = true): Long {
-        val factor = if (isGguf) 1.15 else 1.2
-        val overhead = if (isGguf) 600L * MB else 900L * MB
-        return (fileBytes * factor).toLong() + overhead
+    /**
+     * Weights plus runtime buffers plus a KV cache that grows with the context.
+     * At the 2K chat cap this is the original 1.15x + 600 MB model; asking for
+     * a bigger context now scales instead of silently underestimating.
+     */
+    fun estimateRamBytes(
+        fileBytes: Long,
+        isGguf: Boolean = true,
+        contextTokens: Int = CHAT_CONTEXT_TOKENS,
+    ): Long {
+        val factor = if (isGguf) GGUF_WEIGHT_FACTOR else OTHER_WEIGHT_FACTOR
+        val base = if (isGguf) GGUF_RUNTIME_BASE else OTHER_RUNTIME_BASE
+        val perK = if (isGguf) GGUF_KV_PER_K_TOKENS else OTHER_KV_PER_K_TOKENS
+        val kv = (perK * (contextTokens.coerceAtLeast(0) / 1_024.0)).toLong()
+        return (fileBytes * factor).toLong() + base + kv
     }
 
     fun quantLabel(fileName: String): String {
