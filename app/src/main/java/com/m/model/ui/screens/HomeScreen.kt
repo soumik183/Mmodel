@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -333,13 +335,18 @@ private fun HeroPill(text: String) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) {
+    // Everything inside scales from the card width so the same composable works
+    // as a narrow phone card or a wide tablet card.
+    val compact = width < 300.dp
+    val padding = if (compact) 14.dp else 16.dp
     Surface(
         onClick = onClick,
         modifier = Modifier
             .width(width)
-            .heightIn(min = 188.dp),
+            .heightIn(min = if (compact) 178.dp else 192.dp),
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -364,15 +371,15 @@ private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) 
                     ),
             )
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(padding),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 12.dp),
                 ) {
-                    LetterAvatar(name = card.name, size = 44.dp)
+                    LetterAvatar(name = card.name, size = if (compact) 40.dp else 46.dp)
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -397,25 +404,20 @@ private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) 
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
 
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
+                    MetaItem(
+                        icon = Icons.Rounded.Download,
+                        text = formatBytes(card.downloadBytes),
+                    )
+                    if (card.parameters != null) {
                         MetaItem(
-                            icon = Icons.Rounded.Download,
-                            text = formatBytes(card.downloadBytes),
+                            icon = Icons.Rounded.Memory,
+                            text = formatParams(card.parameters),
                         )
-                        if (card.parameters != null) {
-                            MetaItem(
-                                icon = Icons.Rounded.Memory,
-                                text = formatParams(card.parameters),
-                            )
-                        }
                     }
                     card.bestVariant?.let { best ->
                         Surface(
@@ -440,6 +442,7 @@ private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) 
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
