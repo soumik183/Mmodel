@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -58,6 +60,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -202,32 +206,71 @@ fun BrowseScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ModelCategory.entries.forEach { category ->
-                        FilterChip(
-                            selected = state.category == category,
-                            onClick = { vm.setCategory(category) },
-                            label = { Text(category.label) },
-                            shape = CircleShape,
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                        )
+                val chipScroll = rememberScrollState()
+                Box(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(chipScroll),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ModelCategory.entries.forEach { category ->
+                            val selected = state.category == category
+                            FilterChip(
+                                selected = selected,
+                                onClick = { vm.setCategory(category) },
+                                label = { Text(category.label, maxLines = 1) },
+                                shape = CircleShape,
+                                leadingIcon = if (selected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    iconColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
+                                ),
+                            )
+                        }
+                    }
+                    if (chipScroll.canScrollForward) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .padding(vertical = 2.dp),
+                            contentAlignment = Alignment.CenterEnd,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(28.dp)
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(
+                                                Color.Transparent,
+                                                MaterialTheme.colorScheme.background,
+                                            ),
+                                        ),
+                                    ),
+                            )
+                        }
                     }
                 }
                 Box {
                     Surface(
                         onClick = { sortMenuOpen = true },
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         border = BorderStroke(
                             1.dp,
@@ -246,7 +289,11 @@ fun BrowseScreen(
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
                             )
-                            Text(text = state.sort.label, style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                text = state.sort.shortLabel(),
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                            )
                             Icon(
                                 imageVector = Icons.Rounded.ArrowDropDown,
                                 contentDescription = null,
@@ -432,4 +479,11 @@ fun BrowseScreen(
             }
         }
     }
+}
+
+/** Compact labels for the toolbar chip; the dropdown keeps the full wording. */
+private fun ModelSort.shortLabel(): String = when (this) {
+    ModelSort.TRENDING -> "Trending"
+    ModelSort.LIKED -> "Liked"
+    ModelSort.RECENT -> "Updated"
 }

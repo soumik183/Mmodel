@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.m.model.data.DeviceSpecs
@@ -145,19 +146,25 @@ fun HomeScreen(
                                 .clip(CircleShape),
                         )
                     }
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        items(
-                            items = recommendations,
-                            key = { it.id },
-                            contentType = { "recommendation" },
-                        ) { card ->
-                            RecommendationCard(
-                                card = card,
-                                onClick = { onOpenModel(card.id) },
-                            )
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        // 82% of the viewport reads as a deliberate peek of the
+                        // next card, and clamps keep it sane on tablets.
+                        val cardWidth = (maxWidth * 0.82f).coerceIn(268.dp, 396.dp)
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(
+                                items = recommendations,
+                                key = { it.id },
+                                contentType = { "recommendation" },
+                            ) { card ->
+                                RecommendationCard(
+                                    card = card,
+                                    width = cardWidth,
+                                    onClick = { onOpenModel(card.id) },
+                                )
+                            }
                         }
                     }
                 }
@@ -327,12 +334,12 @@ private fun HeroPill(text: String) {
 }
 
 @Composable
-private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
+private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         modifier = Modifier
-            .widthIn(min = 280.dp, max = 340.dp)
-            .heightIn(min = 210.dp),
+            .width(width)
+            .heightIn(min = 188.dp),
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -346,27 +353,26 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(5.dp)
+                    .height(4.dp)
                     .background(
                         Brush.horizontalGradient(
                             listOf(
                                 MaterialTheme.colorScheme.primary,
                                 MaterialTheme.colorScheme.secondary,
-                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
                             ),
                         ),
                     ),
             )
             Column(
-                modifier = Modifier.padding(18.dp),
+                modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    LetterAvatar(name = card.name, size = 52.dp)
+                    LetterAvatar(name = card.name, size = 44.dp)
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -374,7 +380,8 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
                         Text(
                             text = card.name,
                             style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
+                            minLines = 2,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
@@ -387,22 +394,17 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
                     }
                     FitBadge(fit = card.fit.fit)
                 }
-                Text(
-                    text = card.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    minLines = 2,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         MetaItem(
                             icon = Icons.Rounded.Download,
@@ -420,14 +422,10 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer,
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            border = BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                            ),
                         ) {
                             Text(
                                 text = best.quant,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -435,34 +433,14 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
                         }
                     }
                 }
-                card.fit.estimatedRamBytes?.let {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
-                        ),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Memory,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Text(
-                                text = "~${formatBytes(it)} RAM needed",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
-                            )
-                        }
-                    }
-                }
+
+                val ram = card.fit.estimatedRamBytes
+                Text(
+                    text = ram?.let { "~${formatBytes(it)} RAM to run" } ?: "RAM estimate unavailable",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
         }
     }

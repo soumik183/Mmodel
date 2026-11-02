@@ -71,5 +71,7 @@ enum class ModelCategory(val label: String, val filters: List<String>) {
     CHAT("Chat", listOf("gguf", "text-generation")),
     VISION("Vision", listOf("gguf", "image-text-to-text")),
     AUDIO("Audio", listOf("gguf", "audio")),
+    TTS("Text to speech", listOf("gguf", "text-to-speech")),
+    STT("Speech to text", listOf("gguf", "automatic-speech-recognition")),
     EMBEDDINGS("Embeddings", listOf("gguf", "feature-extraction")),
 }

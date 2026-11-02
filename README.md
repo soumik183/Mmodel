@@ -49,8 +49,8 @@ best. Mmodel answers the question that actually matters first:
   version, and whether local chat is supported
 - **Hugging Face search** — 20 results per page, infinite scroll, sort by trending / likes / recently
   updated, and category filters
-- **Categories** — All, GGUF, Chat, Vision, Audio and Embeddings; task categories are constrained to
-  GGUF so they stay download- and chat-friendly
+- **Categories** — All, GGUF, Chat, Vision, Audio, Text to speech, Speech to text and Embeddings;
+  task categories are constrained to GGUF so they stay download- and chat-friendly
 - **Real-data fit estimate** — actual GGUF file sizes (multi-shard quants summed), per-quant fit
   badges, RAM overhead, and free-storage checks
 - **Model vs phone comparison** — side-by-side memory, download and local-chat checks using the same
