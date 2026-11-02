@@ -3,7 +3,6 @@ package com.m.model.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +25,6 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -164,96 +162,79 @@ fun MmodelApp(vm: MainViewModel = viewModel()) {
 }
 
 /**
- * Floating glass capsule: a single rounded surface holds the four tabs, and the
- * active tab gets a filled pill with a slightly larger icon.
+ * Transparent bar: only the active pill and the icons are drawn, so the screen
+ * background stays visible underneath.
  */
 @Composable
 private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(30.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            border = BorderStroke(
-                1.dp,
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-            ),
-            tonalElevation = 6.dp,
-            shadowElevation = 10.dp,
-        ) {
-            Row(
-                modifier = Modifier.padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+        appTabs.forEachIndexed { index, item ->
+            val active = selected == index
+            val background by animateColorAsState(
+                targetValue = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.Transparent
+                },
+                label = "navBackground",
+            )
+            val content by animateColorAsState(
+                targetValue = if (active) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                label = "navContent",
+            )
+            val iconScale by animateFloatAsState(
+                targetValue = if (active) 1f else 0.92f,
+                label = "navIconScale",
+            )
+            val labelAlpha by animateFloatAsState(
+                targetValue = if (active) 1f else 0.7f,
+                label = "navLabelAlpha",
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(54.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(background)
+                    .selectable(
+                        selected = active,
+                        onClick = { onSelect(index) },
+                        role = Role.Tab,
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                appTabs.forEachIndexed { index, item ->
-                    val active = selected == index
-                    val background by animateColorAsState(
-                        targetValue = if (active) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color.Transparent
-                        },
-                        label = "navBackground",
-                    )
-                    val content by animateColorAsState(
-                        targetValue = if (active) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        label = "navContent",
-                    )
-                    val iconScale by animateFloatAsState(
-                        targetValue = if (active) 1f else 0.92f,
-                        label = "navIconScale",
-                    )
-                    val labelAlpha by animateFloatAsState(
-                        targetValue = if (active) 1f else 0.7f,
-                        label = "navLabelAlpha",
-                    )
-                    Box(
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
                         modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(background)
-                            .selectable(
-                                selected = active,
-                                onClick = { onSelect(index) },
-                                role = Role.Tab,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.label,
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .graphicsLayer {
-                                        scaleX = iconScale
-                                        scaleY = iconScale
-                                    },
-                                tint = content,
-                            )
-                            Text(
-                                text = item.label,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = content.copy(alpha = labelAlpha),
-                                maxLines = 1,
-                            )
-                        }
-                    }
+                            .size(22.dp)
+                            .graphicsLayer {
+                                scaleX = iconScale
+                                scaleY = iconScale
+                            },
+                        tint = content,
+                    )
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = content.copy(alpha = labelAlpha),
+                        maxLines = 1,
+                    )
                 }
             }
         }
