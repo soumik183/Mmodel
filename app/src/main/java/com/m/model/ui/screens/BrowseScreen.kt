@@ -90,10 +90,17 @@ fun BrowseScreen(
 
     LaunchedEffect(listState) {
         snapshotFlow {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            last to vm.browse.items.size
-        }.collect { (last, count) ->
-            if (count > 0 && last >= count - 4) vm.loadMoreBrowse()
+            val layoutInfo = listState.layoutInfo
+            val last = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val visibleCount = layoutInfo.visibleItemsInfo.size
+            Triple(last, vm.browse.items.size, visibleCount)
+        }.collect { (last, count, visibleCount) ->
+            if (count > 0) {
+                val threshold = (visibleCount.coerceAtLeast(4) + 2).coerceAtMost(10)
+                if (last >= count - threshold) {
+                    vm.loadMoreBrowse()
+                }
+            }
         }
     }
 
@@ -105,21 +112,22 @@ fun BrowseScreen(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Explore",
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.onBackground,
                     )
                     Text(
                         text = when {
                             state.loading && state.items.isEmpty() -> "Reading the Hugging Face catalog…"
-                            state.items.isEmpty() -> "Search the Hugging Face catalog"
+                            state.items.isEmpty() -> "Search and discover GGUF models"
                             else -> buildString {
                                 append(state.items.size)
                                 if (!state.endReached) append("+")
-                                append(" models · ${state.category.label} · Hugging Face")
+                                append(" models • ${state.category.label}")
                             }
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -128,18 +136,22 @@ fun BrowseScreen(
                 }
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                     border = BorderStroke(
                         1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
                     ),
+                    tonalElevation = 1.dp,
                 ) {
-                    IconButton(onClick = vm::refreshBrowse) {
+                    IconButton(
+                        onClick = vm::refreshBrowse,
+                        modifier = Modifier.size(44.dp),
+                    ) {
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
                             contentDescription = "Reload models",
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                 }
@@ -312,10 +324,24 @@ fun BrowseScreen(
                         .fillMaxWidth()
                         .padding(20.dp),
                 ) {
+                    val hasFilters = state.query.isNotBlank() || state.category != com.m.model.data.ModelCategory.GGUF
                     MessageCard(
                         icon = Icons.Rounded.Search,
                         title = "No models found",
-                        message = "Try a different name, or pick another category.",
+                        message = if (hasFilters) {
+                            "Try clearing your search or filters to see more results."
+                        } else {
+                            "Try a different name, or pick another category."
+                        },
+                        actionLabel = if (hasFilters) "Clear filters" else null,
+                        onAction = if (hasFilters) {
+                            {
+                                vm.onQueryChange("")
+                                vm.setCategory(com.m.model.data.ModelCategory.GGUF)
+                            }
+                        } else {
+                            null
+                        },
                     )
                 }
             }

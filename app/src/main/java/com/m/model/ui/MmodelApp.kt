@@ -171,9 +171,9 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         appTabs.forEachIndexed { index, item ->
             val active = selected == index
@@ -189,19 +189,19 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                 targetValue = if (active) {
                     MaterialTheme.colorScheme.onPrimary
                 } else {
-                    MaterialTheme.colorScheme.onSurface
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 label = "navContent",
             )
             val iconScale by animateFloatAsState(
-                targetValue = if (active) 1f else 0.9f,
+                targetValue = if (active) 1f else 0.92f,
                 label = "navIconScale",
             )
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(56.dp)
-                    .clip(RoundedCornerShape(24.dp))
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(28.dp))
                     .background(background)
                     .selectable(
                         selected = active,
@@ -216,9 +216,9 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                 ) {
                     Icon(
                         imageVector = item.icon,
-                        contentDescription = null,
+                        contentDescription = item.label,
                         modifier = Modifier
-                            .size(22.dp)
+                            .size(24.dp)
                             .graphicsLayer {
                                 scaleX = iconScale
                                 scaleY = iconScale
@@ -229,6 +229,7 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                         text = item.label,
                         style = MaterialTheme.typography.labelSmall,
                         color = content,
+                        maxLines = 1,
                     )
                 }
             }

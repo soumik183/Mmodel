@@ -145,7 +145,8 @@ fun HomeScreen(
                         )
                     }
                     LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         items(
                             items = recommendations,
@@ -187,9 +188,9 @@ private fun BrandHeader() {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        BrandMark(size = 46.dp)
-        Spacer(Modifier.width(12.dp))
+        BrandMark(size = 48.dp)
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "Mmodel",
@@ -197,32 +198,36 @@ private fun BrandHeader() {
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Text(
-                text = "LOCAL AI · ANDROID",
-                style = MaterialTheme.typography.labelSmall,
+                text = "Local AI • On-Device",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 1.6.sp,
             )
         }
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = MaterialTheme.colorScheme.primary,
             border = BorderStroke(
                 1.dp,
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
             ),
+            tonalElevation = 1.dp,
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(
                     imageVector = Icons.Rounded.AutoAwesome,
                     contentDescription = null,
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(14.dp),
                 )
-                Text(text = "Hugging Face", style = MaterialTheme.typography.labelSmall)
+                Text(
+                    text = "Hugging Face",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                )
             }
         }
     }
@@ -325,106 +330,141 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         modifier = Modifier
-            .width(286.dp)
-            .heightIn(min = 196.dp),
-        shape = MaterialTheme.shapes.large,
+            .widthIn(min = 280.dp, max = 340.dp)
+            .heightIn(min = 210.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-        tonalElevation = 0.dp,
+        border = BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                listOf(
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f),
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                ),
+            ),
+        ),
+        tonalElevation = 2.dp,
+        shadowElevation = 4.dp,
     ) {
         Column {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(4.dp)
+                    .height(5.dp)
                     .background(
                         Brush.horizontalGradient(
                             listOf(
                                 MaterialTheme.colorScheme.primary,
                                 MaterialTheme.colorScheme.secondary,
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
                             ),
                         ),
                     ),
             )
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    LetterAvatar(name = card.name, size = 46.dp)
-                    Spacer(Modifier.weight(1f))
+                    LetterAvatar(name = card.name, size = 52.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = card.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = card.author.ifBlank { "Hugging Face" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     FitBadge(fit = card.fit.fit)
                 }
                 Text(
                     text = card.name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                     minLines = 2,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = card.author.ifBlank { "Hugging Face" },
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    ) {
+                        MetaItem(
+                            icon = Icons.Rounded.Download,
+                            text = formatBytes(card.downloadBytes),
+                        )
+                        if (card.parameters != null) {
+                            MetaItem(
+                                icon = Icons.Rounded.Memory,
+                                text = formatParams(card.parameters),
+                            )
+                        }
+                    }
                     card.bestVariant?.let { best ->
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            contentColor = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                            ),
                         ) {
                             Text(
                                 text = best.quant,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                             )
                         }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    MetaItem(
-                        icon = Icons.Rounded.Download,
-                        text = formatBytes(card.downloadBytes),
-                    )
-                    if (card.parameters != null) {
-                        MetaItem(
-                            icon = Icons.Rounded.Memory,
-                            text = formatParams(card.parameters),
-                        )
-                    }
-                }
                 card.fit.estimatedRamBytes?.let {
                     Surface(
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f),
+                        ),
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Memory,
                                 contentDescription = null,
-                                modifier = Modifier.size(13.dp),
+                                modifier = Modifier.size(14.dp),
                             )
                             Text(
-                                text = "~${formatBytes(it)} RAM",
+                                text = "~${formatBytes(it)} RAM needed",
                                 style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
                             )
                         }
                     }
@@ -496,15 +536,33 @@ private fun DeviceCard(device: DeviceSpecs) {
                 }
             }
 
-            LinearProgressIndicator(
-                progress = { ramUsed },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(CircleShape),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Memory usage",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = "${(ramUsed * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = { ramUsed },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SpecTile(

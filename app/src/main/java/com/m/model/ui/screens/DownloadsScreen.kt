@@ -106,12 +106,26 @@ fun DownloadsScreen(
                     "${records.size} model${if (records.size == 1) "" else "s"} · ${formatBytes(readyBytes)} ready"
                 },
                 trailing = {
-                    IconButton(onClick = vm::refreshDevice) {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "Recheck storage",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                        ),
+                        tonalElevation = 1.dp,
+                    ) {
+                        IconButton(
+                            onClick = vm::refreshDevice,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Recheck storage",
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
                     }
                 },
             )

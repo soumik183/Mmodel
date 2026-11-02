@@ -245,7 +245,9 @@ fun ChatScreen(
                                 FilledIconButton(
                                     onClick = {
                                         scope.launch {
-                                            listState.animateScrollToItem(state.messages.size)
+                                            if (state.messages.isNotEmpty()) {
+                                                listState.animateScrollToItem(state.messages.lastIndex)
+                                            }
                                         }
                                     },
                                     modifier = Modifier
@@ -311,37 +313,55 @@ private fun ChatHeader(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Chat",
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
                 Text(
-                    text = "Private inference on this phone",
+                    text = "Private on-device inference",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = if (state.ready) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
+                contentColor = if (state.ready) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (state.ready) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    },
+                ),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Memory,
                         contentDescription = null,
-                        modifier = Modifier.size(13.dp),
+                        modifier = Modifier.size(14.dp),
                     )
                     Text(
                         text = if (state.ready) "Loaded" else "Offline",
                         style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
             }
@@ -349,16 +369,18 @@ private fun ChatHeader(
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+            tonalElevation = 1.dp,
         ) {
             Row(
-                modifier = Modifier.padding(10.dp),
+                modifier = Modifier.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                LetterAvatar(name = selected?.modelName ?: "Mmodel", size = 38.dp)
+                LetterAvatar(name = selected?.modelName ?: "Mmodel", size = 42.dp)
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -372,11 +394,11 @@ private fun ChatHeader(
                     Text(
                         text = selected?.let {
                             if (it.isImported && it.totalBytes <= 0L) {
-                                "Imported · size unknown"
+                                "Imported • size unknown"
                             } else {
-                                "${it.quant} · ${formatBytes(it.totalBytes)}"
+                                "${it.quant} • ${formatBytes(it.totalBytes)}"
                             }
-                        } ?: "Choose a downloaded model",
+                        } ?: "Choose a downloaded model to start chatting",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -1058,23 +1080,40 @@ private fun ChatInput(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = "Local · private",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    text = buildString {
-                        if (contextLength > 0) append(formatContext(contextLength.toLong()))
-                        if (threads > 0) {
-                            if (isNotEmpty()) append(" · ")
-                            append("$threads threads")
-                        }
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (value.isNotEmpty() && value.length > 3600) {
+                        Text(
+                            text = "${value.length}/4000",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (value.length > 3800) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    Text(
+                        text = buildString {
+                            if (contextLength > 0) append(formatContext(contextLength.toLong()))
+                            if (threads > 0) {
+                                if (isNotEmpty()) append(" · ")
+                                append("$threads threads")
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
