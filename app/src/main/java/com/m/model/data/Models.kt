@@ -64,17 +64,11 @@ enum class ModelSort(val label: String, val apiValue: String) {
 /**
  * Hugging Face treats repeated `filter` parameters as AND. Task categories
  * also include `gguf` so every result has a downloadable local-chat file.
- * `search` is an optional keyword used where HF has no pipeline tag (coding).
  */
-enum class ModelCategory(
-    val label: String,
-    val filters: List<String>,
-    val search: String? = null,
-) {
+enum class ModelCategory(val label: String, val filters: List<String>) {
     ALL("All", emptyList()),
     GGUF("GGUF", listOf("gguf")),
     CHAT("Chat", listOf("gguf", "text-generation")),
-    CODING("Coding", listOf("gguf", "text-generation"), search = "coder"),
     VISION("Vision", listOf("gguf", "image-text-to-text")),
     AUDIO("Audio", listOf("gguf", "audio")),
     TTS("Text to speech", listOf("gguf", "text-to-speech")),

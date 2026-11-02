@@ -54,7 +54,6 @@ data class BrowseState(
     val query: String = "",
     val sort: ModelSort = ModelSort.TRENDING,
     val category: ModelCategory = ModelCategory.GGUF,
-    val workingOnly: Boolean = false,
     val items: List<ModelCard> = emptyList(),
     val loading: Boolean = true,
     val loadingMore: Boolean = false,
@@ -191,25 +190,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCategory(value: ModelCategory) {
         if (browse.category == value) return
-        // Coding has no HF pipeline tag, so it drives the search box. Replace
-        // only a keyword this screen filled in, never something the user typed.
-        val previous = browse.category.search
-        val query = when {
-            previous != null && browse.query == previous -> value.search.orEmpty()
-            value.search != null && browse.query.isBlank() -> value.search
-            else -> browse.query
-        }
-        browse = browse.copy(
-            category = value,
-            query = query,
-            items = emptyList(),
-            endReached = false,
-        )
+        browse = browse.copy(category = value, items = emptyList(), endReached = false)
         scheduleSearch(0)
-    }
-
-    fun toggleWorkingOnly() {
-        browse = browse.copy(workingOnly = !browse.workingOnly)
     }
 
     fun refreshBrowse() {

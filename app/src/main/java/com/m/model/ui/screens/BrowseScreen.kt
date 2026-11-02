@@ -33,13 +33,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -67,7 +65,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import com.m.model.data.Fit
 import com.m.model.data.ModelCategory
 import com.m.model.data.ModelSort
 import com.m.model.ui.MainViewModel
@@ -85,13 +82,6 @@ fun BrowseScreen(
 ) {
     val state = vm.browse
     var sortMenuOpen by remember { mutableStateOf(false) }
-    // "Works here" is a view filter: it hides quants this phone can't load but
-    // keeps paging untouched, so turning it off reveals what was fetched.
-    val visible = if (state.workingOnly) {
-        state.items.filter { it.fit.fit == Fit.WORKS || it.fit.fit == Fit.SLOW }
-    } else {
-        state.items
-    }
 
     // A new query, category or sort starts at the top. drop(1) ignores the value
     // re-emitted when this screen returns from a model detail, so the previous
@@ -139,10 +129,9 @@ fun BrowseScreen(
                             state.loading && state.items.isEmpty() -> "Reading the Hugging Face catalog…"
                             state.items.isEmpty() -> "Search and discover GGUF models"
                             else -> buildString {
-                                append(visible.size)
+                                append(state.items.size)
                                 if (!state.endReached) append("+")
                                 append(" models • ${state.category.label}")
-                                if (state.workingOnly) append(" • works here")
                             }
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -225,27 +214,6 @@ fun BrowseScreen(
                             .horizontalScroll(chipScroll),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        FilterChip(
-                            selected = state.workingOnly,
-                            onClick = vm::toggleWorkingOnly,
-                            label = { Text("Works here", maxLines = 1) },
-                            shape = CircleShape,
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Rounded.CheckCircle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                selectedContainerColor = MaterialTheme.colorScheme.secondary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onSecondary,
-                                selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondary,
-                            ),
-                        )
                         ModelCategory.entries.forEach { category ->
                             val selected = state.category == category
                             FilterChip(
@@ -396,43 +364,33 @@ fun BrowseScreen(
                 }
             }
 
-            visible.isEmpty() -> {
+            state.items.isEmpty() -> {
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(20.dp),
                 ) {
-                    if (state.workingOnly && state.items.isNotEmpty()) {
-                        MessageCard(
-                            icon = Icons.Rounded.WarningAmber,
-                            title = "Nothing here runs on this phone",
-                            message = "None of the loaded models fit your RAM or storage. Turn off Works here to see everything, or pick a smaller quantization.",
-                            actionLabel = "Show all models",
-                            onAction = vm::toggleWorkingOnly,
-                        )
-                    } else {
-                        val hasFilters = state.query.isNotBlank() ||
-                            state.category != com.m.model.data.ModelCategory.GGUF
-                        MessageCard(
-                            icon = Icons.Rounded.Search,
-                            title = "No models found",
-                            message = if (hasFilters) {
-                                "Try clearing your search or filters to see more results."
-                            } else {
-                                "Try a different name, or pick another category."
-                            },
-                            actionLabel = if (hasFilters) "Clear filters" else null,
-                            onAction = if (hasFilters) {
-                                {
-                                    vm.onQueryChange("")
-                                    vm.setCategory(com.m.model.data.ModelCategory.GGUF)
-                                }
-                            } else {
-                                null
-                            },
-                        )
-                    }
+                    val hasFilters = state.query.isNotBlank() ||
+                        state.category != com.m.model.data.ModelCategory.GGUF
+                    MessageCard(
+                        icon = Icons.Rounded.Search,
+                        title = "No models found",
+                        message = if (hasFilters) {
+                            "Try clearing your search or filters to see more results."
+                        } else {
+                            "Try a different name, or pick another category."
+                        },
+                        actionLabel = if (hasFilters) "Clear filters" else null,
+                        onAction = if (hasFilters) {
+                            {
+                                vm.onQueryChange("")
+                                vm.setCategory(com.m.model.data.ModelCategory.GGUF)
+                            }
+                        } else {
+                            null
+                        },
+                    )
                 }
             }
 
@@ -462,7 +420,7 @@ fun BrowseScreen(
                         }
                     }
                     items(
-                        items = visible,
+                        items = state.items,
                         key = { it.id },
                         contentType = { "model" },
                     ) { card ->
@@ -508,7 +466,7 @@ fun BrowseScreen(
                             exit = fadeOut() + shrinkVertically(),
                         ) {
                             Text(
-                                text = "End of the catalog · ${visible.size} models",
+                                text = "End of the catalog · ${state.items.size} models",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 16.dp),
