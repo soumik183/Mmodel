@@ -393,8 +393,8 @@ private fun ChatHeader(
                     )
                     Text(
                         text = selected?.let {
-                            if (it.isImported && it.totalBytes <= 0L) {
-                                "Imported • size unknown"
+                            if (it.isImported) {
+                                "${it.typeLabel} • ${formatBytes(it.totalBytes)}"
                             } else {
                                 "${it.quant} • ${formatBytes(it.totalBytes)}"
                             }
@@ -478,7 +478,7 @@ private fun ChatHeader(
                                     contentDescription = null,
                                 )
                             },
-                            text = { Text("Import GGUF from storage") },
+                            text = { Text("Import model from storage") },
                             onClick = {
                                 onMenuExpanded(false)
                                 onImport()
@@ -527,7 +527,7 @@ private fun EmptyChat(
                         style = MaterialTheme.typography.headlineSmall,
                     )
                     Text(
-                        text = "Download a GGUF quantization or import one already on this phone, then load it here. Prompts, replies and the model itself never leave the device.",
+                        text = "Download a GGUF quantization or import a model already on this phone. Chat runs single-file text GGUFs — voice, vision, image and other formats can be imported and kept for conversion. Prompts, replies and the model itself never leave the device.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -543,7 +543,7 @@ private fun EmptyChat(
                                     modifier = Modifier.size(18.dp),
                                 )
                                 Spacer(Modifier.width(6.dp))
-                                Text("Import GGUF")
+                                Text("Import model")
                             }
                         }
                     }
@@ -642,7 +642,15 @@ private fun DownloadedModelRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            FitBadge(fit = fit.fit)
+            if (record.chatBlocker == null) {
+                FitBadge(fit = fit.fit)
+            } else {
+                Text(
+                    text = "No chat",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -659,7 +667,7 @@ private fun LoadModelPane(
     val fit = remember(record.totalBytes, device.inferenceBudgetBytes) {
         ModelFit.ramFit(record.totalBytes, device)
     }
-    val canLoad = device.canRunLocalChat && record.files.size == 1 && fit.fit != Fit.WONT_RUN
+    val canLoad = device.canRunLocalChat && record.chatBlocker == null && fit.fit != Fit.WONT_RUN
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -765,14 +773,12 @@ private fun LoadModelPane(
                         )
                     }
 
-                    val note = when {
+                    val note = record.chatBlocker ?: when {
                         !device.canRunLocalChat -> "Local chat needs a 64-bit ARM phone."
-                        record.files.size > 1 ->
-                            "Chat needs a single-file GGUF. This download has ${record.files.size} shards."
-                        fit.fit == Fit.WONT_RUN ->
-                            "This model needs more RAM than this phone can safely give an app. Choose a smaller quant."
                         fit.availableRamShortfallBytes > 0L ->
                             "Only ${formatBytes(device.availableRamBytes)} is free right now. Close other apps to free about ${formatBytes(fit.availableRamShortfallBytes)} more for a smoother run."
+                        fit.fit == Fit.WONT_RUN ->
+                            "This model needs more RAM than this phone can safely give an app. Choose a smaller quant."
                         fit.fit == Fit.SLOW ->
                             "This is close to the memory limit. Responses may be slow."
                         else -> null
@@ -1169,5 +1175,7 @@ private fun InlineError(text: String) {
     }
 }
 
-private fun DownloadRecord.sizeLabel(): String =
-    if (isImported && totalBytes <= 0L) "Imported · size unknown" else "$quant · ${formatBytes(totalBytes)}"
+private fun DownloadRecord.sizeLabel(): String {
+    val size = if (isImported && totalBytes <= 0L) "size unknown" else formatBytes(totalBytes)
+    return if (isImported) "$typeLabel · $size" else "$quant · $size"
+}

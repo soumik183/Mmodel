@@ -24,7 +24,10 @@ import com.m.model.data.HfModel
 import com.m.model.data.LlamaEngine
 import com.m.model.data.ModelCard
 import com.m.model.data.ModelCategory
+import com.m.model.data.ModelFiles
 import com.m.model.data.ModelFit
+import com.m.model.data.ModelFormat
+import com.m.model.data.ModelKind
 import com.m.model.data.ModelSort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -568,24 +571,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val record = withContext(Dispatchers.IO) {
-                    // The header is the source of truth, so a valid GGUF is accepted
-                    // even when the provider hides or mangles the file name.
-                    val version = ggufVersion(uri)
-                    require(version != null) {
-                        "This file is not a GGUF model. Pick a .gguf file exported by llama.cpp."
-                    }
-                    require(version >= 2) {
-                        "This GGUF is too old (version $version). Re-export it with a newer tool."
-                    }
-
                     val rawName = queryDisplayName(uri)
                     require(!SHARD_NAME.containsMatchIn(rawName)) {
-                        "This is one part of a split model. Import a single-file GGUF instead."
+                        "This is one part of a split GGUF. Import a single-file GGUF instead."
                     }
+
+                    // The GGUF header is the source of truth, so a valid GGUF is
+                    // accepted even when the provider hides or mangles the name.
+                    var format = ModelFiles.formatOf(rawName)
+                    if (format == ModelFormat.GGUF || !ModelFiles.isSupported(rawName)) {
+                        val version = ggufVersion(uri)
+                        if (format == ModelFormat.OTHER) {
+                            require(version != null) {
+                                "Unsupported file. Import a GGUF, safetensors, PyTorch, ONNX, " +
+                                    "TFLite or CoreML model."
+                            }
+                            format = ModelFormat.GGUF
+                        }
+                        require(version != null) {
+                            "This .gguf file is not a valid GGUF model."
+                        }
+                        require(version >= 2) {
+                            "This GGUF is too old (version $version). Re-export it with a newer tool."
+                        }
+                    }
+
                     val displayName = rawName
                         .substringAfterLast('/')
                         .ifBlank { "imported-model.gguf" }
-                        .let { if (it.endsWith(".gguf", ignoreCase = true)) it else "$it.gguf" }
+                        .let { if (it.contains('.')) it else "$it.gguf" }
 
                     // Keep access across restarts when the provider allows it.
                     runCatching {
@@ -596,7 +610,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     downloadsStore.addImported(uri, displayName, queryFileSize(uri))
                 }
-                downloadNotice = "Imported ${record.modelName}. Open it in Chat or Downloads."
+                downloadNotice = buildString {
+                    append("Imported ${record.modelName}")
+                    if (record.format != ModelFormat.GGUF) append(" (${record.format.label})")
+                    append(". ")
+                    append(
+                        when {
+                            record.format != ModelFormat.GGUF ->
+                                "Stored for reference — chat needs a GGUF copy."
+                            record.kind == ModelKind.PROJECTOR ->
+                                "Vision projector saved; import the matching GGUF weights to chat."
+                            record.kind == ModelKind.TTS || record.kind == ModelKind.STT ->
+                                "Voice model saved; chat runs text GGUFs."
+                            record.kind == ModelKind.EMBEDDING || record.kind == ModelKind.IMAGE ->
+                                "Stored for reference; chat runs text GGUFs."
+                            else -> "Open it in Chat or Downloads."
+                        },
+                    )
+                }
             } catch (e: IllegalArgumentException) {
                 downloadNotice = e.message ?: "This file cannot be imported."
             } catch (e: Exception) {
@@ -684,14 +715,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         generationId++
         chatLoadEpoch++
         val epoch = chatLoadEpoch
-        val unsupported = when {
-            !device.canRunLocalChat ->
-                "Local chat needs a 64-bit ARM phone. This device cannot load the engine."
-
-            record.files.size > 1 ->
-                SPLIT_UNSUPPORTED
-
-            else -> null
+        val unsupported = if (!device.canRunLocalChat) {
+            "Local chat needs a 64-bit ARM phone. This device cannot load the engine."
+        } else {
+            record.chatBlocker
         }
 
         _chat.value = ChatState(
@@ -723,10 +750,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _chat.update { it.copy(error = "Local chat needs a 64-bit ARM phone.") }
             return
         }
-        if (record.files.size > 1) {
-            _chat.update {
-                it.copy(error = SPLIT_UNSUPPORTED)
-            }
+        record.chatBlocker?.let { blocker ->
+            _chat.update { it.copy(error = blocker) }
             return
         }
 
@@ -741,6 +766,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_chat.value.recordId != record.id || chatLoadEpoch != epoch) return
 
         val fit = ModelFit.ramFit(record.totalBytes, device)
+        val blocker = record.chatBlocker
+        if (blocker != null) {
+            _chat.update {
+                it.copy(loadingModel = false, ready = false, error = blocker)
+            }
+            return
+        }
         if (fit.fit == Fit.WONT_RUN) {
             _chat.update {
                 it.copy(

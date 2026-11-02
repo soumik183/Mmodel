@@ -162,7 +162,7 @@ fun DownloadsScreen(
                 MessageCard(
                     icon = Icons.Rounded.Download,
                     title = "No models on this phone yet",
-                    message = "Download a GGUF quantization, or import one you already have. Imported files stay in their original folder and are loaded without copying.",
+                    message = "Download a GGUF quantization, or import a model you already have. GGUFs load straight from their original folder; safetensors, PyTorch, ONNX, TFLite and CoreML files are stored for reference and conversion.",
                     actionLabel = "Explore models",
                     onAction = onBrowse,
                 )
@@ -317,10 +317,10 @@ private fun StorageCard(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Import GGUF from storage")
+                Text("Import model from storage")
             }
             Text(
-                text = "Pick a single-file GGUF from any folder. The original file stays where it is.",
+                text = "GGUF, safetensors, PyTorch, ONNX, TFLite or CoreML. Single-file GGUFs can chat; other formats are kept for reference. The original file stays where it is.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.84f),
             )
@@ -367,9 +367,9 @@ private fun DownloadCard(
         ModelFit.ramFit(record.totalBytes, device)
     }
     val canChat = record.isComplete &&
-        record.files.size == 1 &&
         device.canRunLocalChat &&
-        fit.fit != Fit.WONT_RUN
+        fit.fit != Fit.WONT_RUN &&
+        record.chatBlocker == null
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -399,9 +399,11 @@ private fun DownloadCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = record.quant,
+                        text = if (record.isImported) record.typeLabel else record.quant,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 StatusPill(record.status)
@@ -506,12 +508,12 @@ private fun DownloadCard(
             }
 
             if (record.isComplete && !canChat) {
-                val reason = when {
-                    record.files.size > 1 -> "Chat needs a single-file GGUF. This download is split."
-                    !device.canRunLocalChat -> "Chat needs a 64-bit ARM device."
-                    fit.fit == Fit.WONT_RUN -> "Not enough safe RAM to load this model."
-                    else -> "This model cannot be loaded for chat."
-                }
+                val reason = record.chatBlocker
+                    ?: when {
+                        !device.canRunLocalChat -> "Chat needs a 64-bit ARM device."
+                        fit.fit == Fit.WONT_RUN -> "Not enough safe RAM to load this model."
+                        else -> "This model cannot be loaded for chat."
+                    }
                 Text(
                     text = reason,
                     style = MaterialTheme.typography.bodySmall,

@@ -61,8 +61,11 @@ best. Mmodel answers the question that actually matters first:
   direct Hugging Face link
 - **Downloads** — choose a quantization, see the exact app-private folder and file sizes,
   pause/resume with HTTP Range, delete with confirmation, and browse downloaded models
-- **Import from storage** — pick a single-file GGUF with Android's document picker. It loads through
-  a file descriptor, so the original file is not copied into app storage
+- **Import from storage** — pick any model file with Android's document picker: GGUF, safetensors,
+  PyTorch, ONNX, TFLite or CoreML. Imports are typed from the file name (text, vision, TTS, STT,
+  image, embeddings, projector), and single-file text GGUFs load through a file descriptor so the
+  original file is not copied into app storage. Other formats are kept for reference and clearly
+  marked as not chat-capable instead of failing at load time
 - **Download guardrails** — warns when a quant is Slow / Won't run / missing a reported size, is
   sharded, or is not chat-ready before the download starts
 - **Local chat** — llama.cpp inference on `arm64-v8a`, streaming tokens, stop generation, regenerate,
@@ -175,10 +178,11 @@ can be paused/resumed. They are removed when you uninstall Mmodel.
 - Partial files are kept for Resume.
 - Multi-shard GGUF quants are downloaded together. Local chat currently supports **single-file GGUFs
   only** because the bundled runtime loads one model file descriptor.
-- **Imported GGUFs** stay in their original folder and are read through a persisted Android Storage
-  Access Framework URI. They are not copied into app storage. Deleting the imported record in Mmodel
-  does not delete the original file. If a provider revokes access after a restart, import the file
-  again.
+- **Imported models** stay in their original folder and are read through a persisted Android
+  Storage Access Framework URI. They are not copied into app storage. Deleting the imported record
+  in Mmodel does not delete the original file. If a provider revokes access after a restart, import
+  the file again. GGUF imports are validated by their magic bytes and version; safetensors, PyTorch,
+  ONNX, TFLite and CoreML imports are detected from the extension and marked as not chat-capable.
 - Gated/private Hugging Face repos return HTTP 401/403; accept access on the website first. A token is
   not stored by the app.
 

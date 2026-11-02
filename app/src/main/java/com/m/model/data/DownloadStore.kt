@@ -63,11 +63,28 @@ data class DownloadRecord(
     val completedAt: Long? = null,
     /** A persisted SAF URI for a GGUF imported from the phone. */
     val sourceUri: String? = null,
+    /** Container format; only [ModelFormat.GGUF] is executable by the chat engine. */
+    val format: ModelFormat = ModelFormat.GGUF,
+    /** Best-effort family detected from the file name on import. */
+    val kind: ModelKind = ModelKind.TEXT,
 ) {
     val totalBytes: Long get() = files.sumOf { it.bytesTotal }
     val doneBytes: Long get() = files.sumOf { if (it.done) it.bytesTotal else it.bytesDone }
     val isComplete: Boolean get() = files.isNotEmpty() && files.all { it.done }
     val isImported: Boolean get() = !sourceUri.isNullOrBlank()
+
+    /** Human type shown in lists, e.g. "Safetensors · Text". */
+    val typeLabel: String
+        get() = if (format == ModelFormat.GGUF) kind.label else "${format.label} · ${kind.label}"
+
+    /** Null when chat can load this file, otherwise the reason it cannot. */
+    val chatBlocker: String?
+        get() = if (!isComplete) {
+            "The download is not finished."
+        } else {
+            ModelFiles.chatBlocker(format, kind, files.size)
+        }
+
     val firstPath: String? get() = if (isImported) {
         null
     } else {
@@ -157,12 +174,12 @@ class DownloadStore(context: Context) {
         val id = "local|$uri|$safeName"
         _records.value.firstOrNull { it.id == id }?.let { return it }
 
+        val format = ModelFiles.formatOf(safeName)
         val record = DownloadRecord(
             id = id,
             modelId = "local/$safeName",
             modelName = safeName
-                .removeSuffix(".gguf")
-                .removeSuffix(".GGUF")
+                .substringBeforeLast('.', safeName)
                 .ifBlank { "Imported model" },
             quant = "Imported",
             dirPath = "",
@@ -178,6 +195,8 @@ class DownloadStore(context: Context) {
             status = DownloadStatus.DONE,
             completedAt = System.currentTimeMillis(),
             sourceUri = uri.toString(),
+            format = format,
+            kind = ModelFiles.kindOf(safeName, format),
         )
         _records.update { current -> listOf(record) + current }
         persist()
@@ -587,6 +606,9 @@ class DownloadStore(context: Context) {
     }
 
     private fun normalize(record: DownloadRecord): DownloadRecord {
+        // Imported files live behind a SAF URI, not in dirPath; probing the
+        // local path would mark them missing on every restart.
+        if (record.isImported) return record
         val files = record.files.map { file ->
             val target = File(record.dirPath, file.localName)
             val part = File(record.dirPath, file.localName + ".part")
