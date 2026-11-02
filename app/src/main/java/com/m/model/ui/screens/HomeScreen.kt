@@ -337,13 +337,7 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
         contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(
             1.dp,
-            Brush.linearGradient(
-                listOf(
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f),
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                ),
-            ),
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
         ),
         tonalElevation = 2.dp,
     ) {
