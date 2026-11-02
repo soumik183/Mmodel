@@ -346,7 +346,6 @@ private fun RecommendationCard(card: ModelCard, onClick: () -> Unit) {
             ),
         ),
         tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
     ) {
         Column {
             Box(
