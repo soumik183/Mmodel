@@ -2,6 +2,8 @@ package com.m.model.data
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.os.StatFs
 import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CancellationException
@@ -138,11 +140,84 @@ class DownloadStore(context: Context) {
     }
     private val manifest = File(appContext.filesDir, "downloads.json")
     private val persistLock = Any()
+    private val folderPrefs = appContext.getSharedPreferences("downloads", 0)
 
-    val modelsRoot: File = File(
+    private val defaultModelsRoot = File(
         appContext.getExternalFilesDir(null) ?: appContext.filesDir,
         "models",
     )
+
+    /**
+     * Root new downloads write to. A custom folder is only used while it stays
+     * usable (exists/createable, writable); otherwise the app default is used.
+     * Existing records keep their absolute paths either way.
+     */
+    val modelsRoot: File get() = effectiveModelsRoot()
+
+    /** True when All Files Access (or legacy storage) is available on this device. */
+    fun hasAllFilesAccess(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        @Suppress("DEPRECATION")
+        Environment.isExternalStorageLegacy()
+    }
+
+    /** Result of the last successful probe; avoids a write/delete on every UI read. */
+    @Volatile
+    private var verifiedCustomRoot: File? = null
+
+    /** Path chosen by the user, or null when the app default is used. */
+    fun customDownloadRoot(): String? =
+        folderPrefs.getString(KEY_DOWNLOAD_ROOT, null)?.takeIf { it.isNotBlank() }
+
+    fun isCustomDownloadRoot(): Boolean = customDownloadRoot() != null
+
+    fun defaultDownloadRoot(): File = defaultModelsRoot
+
+    /** Point new downloads at [path]; null on success, otherwise a readable reason. */
+    fun setDownloadRoot(path: String): String? {
+        val trimmed = path.trim()
+        if (trimmed.isEmpty()) return "Enter a folder path."
+        if (!hasAllFilesAccess()) return "Grant All Files Access in Settings first."
+
+        val dir = File(trimmed)
+        if (dir.exists() && !dir.isDirectory) return "That path is a file, not a folder."
+        if (!dir.exists() && !runCatching { dir.mkdirs() }.getOrDefault(false)) {
+            return "Could not create this folder. Check All Files Access and the path."
+        }
+        probeWritable(dir)?.let { return it }
+        folderPrefs.edit().putString(KEY_DOWNLOAD_ROOT, dir.absolutePath).apply()
+        verifiedCustomRoot = dir
+        return null
+    }
+
+    fun resetDownloadRoot() {
+        folderPrefs.edit().remove(KEY_DOWNLOAD_ROOT).apply()
+        verifiedCustomRoot = null
+    }
+
+    private fun effectiveModelsRoot(): File {
+        val custom = customDownloadRoot() ?: return defaultModelsRoot
+        verifiedCustomRoot?.let { if (it.absolutePath == custom) return it }
+        val dir = File(custom)
+        return if (isUsable(dir)) {
+            verifiedCustomRoot = dir
+            dir
+        } else {
+            defaultModelsRoot
+        }
+    }
+
+    private fun isUsable(dir: File): Boolean = runCatching {
+        (dir.isDirectory || dir.mkdirs()) && probeWritable(dir) == null
+    }.getOrDefault(false)
+
+    /** Null when writable; a readable reason otherwise. */
+    private fun probeWritable(dir: File): String? = runCatching {
+        val probe = File(dir, ".mmodel-test-${System.nanoTime()}")
+        probe.writeBytes(ByteArray(1))
+        if (!probe.delete()) "Could not remove the test file." else null
+    }.getOrElse { "This folder is not writable by the app." }
 
     private val _records = MutableStateFlow<List<DownloadRecord>>(emptyList())
     val records: StateFlow<List<DownloadRecord>> = _records.asStateFlow()
@@ -161,7 +236,7 @@ class DownloadStore(context: Context) {
     private var activeCall: Call? = null
 
     init {
-        runCatching { modelsRoot.mkdirs() }
+        runCatching { effectiveModelsRoot().mkdirs() }
         load()
     }
 
@@ -727,5 +802,6 @@ class DownloadStore(context: Context) {
 
     private companion object {
         const val RESERVED_STORAGE = 300_000_000L
+        const val KEY_DOWNLOAD_ROOT = "download_root_path"
     }
 }

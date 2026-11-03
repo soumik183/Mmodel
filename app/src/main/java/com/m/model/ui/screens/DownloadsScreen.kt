@@ -3,6 +3,9 @@ package com.m.model.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,12 +30,14 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -41,6 +46,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.m.model.data.DeviceSpecs
@@ -83,6 +90,8 @@ fun DownloadsScreen(
     val device = vm.device
     val context = LocalContext.current
     var deleteTarget by remember { mutableStateOf<DownloadRecord?>(null) }
+    var browseMode by remember { mutableStateOf(false) }
+    var folderDialog by remember { mutableStateOf(false) }
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -92,6 +101,11 @@ fun DownloadsScreen(
     val freeBytes = vm.downloadFreeBytes()
     val readyBytes = records.filter { it.isComplete }.sumOf { it.totalBytes }
     val active = records.firstOrNull { it.status == DownloadStatus.DOWNLOADING }
+
+    if (browseMode) {
+        FolderScreen(rootPath = vm.downloadsRootPath, onBack = { browseMode = false })
+        return
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -137,8 +151,11 @@ fun DownloadsScreen(
                 path = vm.downloadsRootPath,
                 freeBytes = freeBytes,
                 readyBytes = readyBytes,
+                isCustom = vm.isCustomDownloadRoot,
                 onCopy = { copyPath(context, vm.downloadsRootPath) },
                 onImport = { importLauncher.launch(arrayOf("*/*")) },
+                onBrowse = { browseMode = true },
+                onChangeFolder = { folderDialog = true },
             )
         }
 
@@ -227,6 +244,13 @@ fun DownloadsScreen(
             },
         )
     }
+
+    if (folderDialog) {
+        ChangeFolderDialog(
+            vm = vm,
+            onDismiss = { folderDialog = false },
+        )
+    }
 }
 
 @Composable
@@ -234,8 +258,11 @@ private fun StorageCard(
     path: String,
     freeBytes: Long,
     readyBytes: Long,
+    isCustom: Boolean,
     onCopy: () -> Unit,
     onImport: () -> Unit,
+    onBrowse: () -> Unit,
+    onChangeFolder: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -266,6 +293,20 @@ private fun StorageCard(
                         imageVector = Icons.Rounded.ContentCopy,
                         contentDescription = "Copy folder path",
                         modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            if (isCustom) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f),
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Text(
+                        text = "Custom folder",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
@@ -302,6 +343,42 @@ private fun StorageCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.82f),
                     )
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onBrowse,
+                    modifier = Modifier.weight(1f),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.24f),
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Storage,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Browse files")
+                }
+                OutlinedButton(
+                    onClick = onChangeFolder,
+                    modifier = Modifier.weight(1f),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.24f),
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Change folder")
                 }
             }
             OutlinedButton(
@@ -610,4 +687,117 @@ private fun copyPath(context: Context, path: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     clipboard?.setPrimaryClip(ClipData.newPlainText("Model path", path))
     Toast.makeText(context, "Path copied", Toast.LENGTH_SHORT).show()
+}
+
+/**
+ * Pick where new downloads go. All Files Access is required because the app
+ * writes plain files and validates the folder with a real write/delete probe
+ * before accepting it.
+ */
+@Composable
+private fun ChangeFolderDialog(
+    vm: MainViewModel,
+    onDismiss: () -> Unit,
+) {
+    var folderPath by remember {
+        mutableStateOf(vm.customDownloadRoot() ?: "/storage/emulated/0/Download/Mmodel")
+    }
+    var folderError by remember { mutableStateOf<String?>(null) }
+    var allFilesAccess by remember { mutableStateOf(vm.hasAllFilesAccess()) }
+    val context = LocalContext.current
+
+    val settingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) {
+        // The user came back from Settings; re-check the grant.
+        allFilesAccess = vm.hasAllFilesAccess()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Download folder") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "New downloads will be saved here. Models you already downloaded stay where they are.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!allFilesAccess) {
+                    Text(
+                        text = "To write to a folder of your choosing, Mmodel needs the All Files Access permission. Your models stay fully offline either way.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Button(
+                        onClick = {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:${context.packageName}"),
+                            )
+                            val launched = runCatching { settingsLauncher.launch(intent) }.isSuccess
+                            if (!launched) {
+                                settingsLauncher.launch(
+                                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                                )
+                            }
+                        },
+                    ) {
+                        Text("Open Settings")
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = folderPath,
+                        onValueChange = {
+                            folderPath = it
+                            folderError = null
+                        },
+                        label = { Text("Folder path") },
+                        placeholder = { Text("/storage/emulated/0/Download/Mmodel") },
+                        singleLine = true,
+                        isError = folderError != null,
+                        supportingText = folderError?.let { message -> { Text(message) } },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Tip: /storage/emulated/0/Download/Mmodel is easy to spot in any file manager.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (allFilesAccess) {
+                TextButton(
+                    onClick = {
+                        val error = vm.setDownloadRoot(folderPath)
+                        if (error == null) {
+                            onDismiss()
+                        } else {
+                            folderError = error
+                        }
+                    },
+                ) {
+                    Text("Use this folder")
+                }
+            }
+        },
+        dismissButton = {
+            Row {
+                if (vm.isCustomDownloadRoot) {
+                    TextButton(
+                        onClick = {
+                            vm.resetDownloadRoot()
+                            onDismiss()
+                        },
+                    ) {
+                        Text("Reset to default")
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        },
+    )
 }

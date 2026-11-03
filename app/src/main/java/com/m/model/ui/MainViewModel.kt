@@ -133,6 +133,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadsStore = DownloadStore(application)
     val downloads: StateFlow<List<DownloadRecord>> = downloadsStore.records
     val downloadsRootPath: String get() = downloadsStore.modelsRoot.absolutePath
+    val isCustomDownloadRoot: Boolean get() = downloadsStore.isCustomDownloadRoot()
+    val customDownloadRoot: String? get() = downloadsStore.customDownloadRoot()
+
+    fun hasAllFilesAccess(): Boolean = downloadsStore.hasAllFilesAccess()
+
+    /** Null on success, otherwise a readable reason for the picker UI. */
+    fun setDownloadRoot(path: String): String? {
+        val error = downloadsStore.setDownloadRoot(path)
+        downloadNotice = error ?: "Download folder changed. New downloads will use it."
+        return error
+    }
+
+    fun resetDownloadRoot() {
+        downloadsStore.resetDownloadRoot()
+        downloadNotice = "Download folder reset to the app default."
+    }
 
     var downloadNotice by mutableStateOf<String?>(null)
         private set
