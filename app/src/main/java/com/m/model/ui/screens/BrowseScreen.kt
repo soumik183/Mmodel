@@ -70,6 +70,8 @@ import com.m.model.data.ModelSort
 import com.m.model.ui.MainViewModel
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.ModelRow
+import com.m.model.ui.components.ModelRowSkeleton
+import com.m.model.ui.components.SpinningIconButton
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 
@@ -148,16 +150,13 @@ fun BrowseScreen(
                     ),
                     tonalElevation = 1.dp,
                 ) {
-                    IconButton(
+                    SpinningIconButton(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "Reload models",
+                        spinning = state.loading,
                         onClick = vm::refreshBrowse,
                         modifier = Modifier.size(44.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "Reload models",
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
+                    )
                 }
             }
 
@@ -337,13 +336,20 @@ fun BrowseScreen(
 
         when {
             state.loading && state.items.isEmpty() -> {
-                Box(
+                LazyColumn(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        end = 20.dp,
+                        top = 14.dp,
+                        bottom = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    userScrollEnabled = false,
                 ) {
-                    CircularProgressIndicator()
+                    items(6) { ModelRowSkeleton() }
                 }
             }
 

@@ -97,8 +97,10 @@ import com.m.model.ui.components.InfoNotice
 import com.m.model.ui.components.LetterAvatar
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.SectionHeader
+import com.m.model.ui.components.ShimmerBox
 import com.m.model.ui.formatBytes
 import com.m.model.ui.formatContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -648,6 +650,76 @@ private fun DownloadedModelRow(
     }
 }
 
+/** Loading state for a model: shimmer avatar, rotating step hint, progress line. */
+@Composable
+private fun ModelLoadingPanel(record: DownloadRecord) {
+    val steps = remember {
+        listOf(
+            "Reading the GGUF from storage…",
+            "Wiring the llama.cpp engine…",
+            "Loading tensors into RAM…",
+            "Warming up the context…",
+        )
+    }
+    var stepIndex by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_700)
+            stepIndex = (stepIndex + 1) % steps.size
+        }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                ShimmerBox(
+                    modifier = Modifier.size(56.dp),
+                    shape = RoundedCornerShape(18.dp),
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = "Loading ${record.modelName}",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = steps[stepIndex],
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                    )
+                }
+            }
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(CircleShape),
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.18f),
+            )
+            Text(
+                text = "Large models can take a minute on first load. Keep the app in front for the smoothest run.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+            )
+        }
+    }
+}
+
 @Composable
 private fun LoadModelPane(
     record: DownloadRecord,
@@ -673,32 +745,7 @@ private fun LoadModelPane(
         }
 
         if (state.loadingModel) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-                Column(
-                    modifier = Modifier.padding(22.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(30.dp),
-                        strokeWidth = 3.dp,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Text(
-                        text = "Loading ${record.modelName}…",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = "Reading the GGUF from storage into RAM. Large models can take a minute.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                    )
-                }
-            }
+            ModelLoadingPanel(record = record)
         } else {
             Surface(
                 modifier = Modifier.fillMaxWidth(),

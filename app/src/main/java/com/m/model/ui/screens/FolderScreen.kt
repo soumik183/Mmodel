@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,7 +22,6 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +45,8 @@ import com.m.model.data.ModelFiles
 import com.m.model.data.ModelFormat
 import com.m.model.ui.components.InfoRow
 import com.m.model.ui.components.MessageCard
+import com.m.model.ui.components.ShimmerBox
+import com.m.model.ui.components.SpinningIconButton
 import com.m.model.ui.formatBytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -116,12 +119,12 @@ fun FolderScreen(rootPath: String, onBack: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = { reload++ }) {
-                Icon(
-                    imageVector = Icons.Rounded.Refresh,
-                    contentDescription = "Reload folder",
-                )
-            }
+            SpinningIconButton(
+                imageVector = Icons.Rounded.Refresh,
+                contentDescription = "Reload folder",
+                spinning = entries == null && error == null,
+                onClick = { reload++ },
+            )
         }
 
         entries?.let { list ->
@@ -158,8 +161,18 @@ fun FolderScreen(rootPath: String, onBack: () -> Unit) {
             }
 
             entries == null -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        end = 20.dp,
+                        top = 8.dp,
+                        bottom = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    userScrollEnabled = false,
+                ) {
+                    items(6) { FileRowSkeleton() }
                 }
             }
 
@@ -212,6 +225,38 @@ fun FolderScreen(rootPath: String, onBack: () -> Unit) {
 
     selected?.let { entry ->
         InspectDialog(entry = entry, onDismiss = { selected = null })
+    }
+}
+
+@Composable
+private fun FileRowSkeleton() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            ShimmerBox(
+                modifier = Modifier.size(46.dp),
+                shape = RoundedCornerShape(14.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ShimmerBox(modifier = Modifier.fillMaxWidth(0.55f).height(14.dp))
+                ShimmerBox(modifier = Modifier.fillMaxWidth(0.3f).height(10.dp))
+            }
+            ShimmerBox(modifier = Modifier.width(58.dp).height(12.dp))
+        }
     }
 }
 

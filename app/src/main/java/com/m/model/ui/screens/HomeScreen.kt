@@ -42,7 +42,6 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,7 +72,9 @@ import com.m.model.ui.components.LetterAvatar
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.MetaItem
 import com.m.model.ui.components.SectionHeader
+import com.m.model.ui.components.ShimmerBox
 import com.m.model.ui.components.SpecTile
+import com.m.model.ui.components.SpinningIconButton
 import com.m.model.ui.formatBytes
 import com.m.model.ui.formatParams
 import com.m.model.ui.theme.BrandGradient
@@ -105,16 +106,12 @@ fun HomeScreen(
                 title = "Recommended for you",
                 subtitle = "Popular GGUF models that fit your phone",
                 trailing = {
-                    IconButton(
+                    SpinningIconButton(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "Refresh recommendations",
+                        spinning = recLoading,
                         onClick = vm::refreshRecommendations,
-                        enabled = !recLoading,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "Refresh recommendations",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    )
                 },
             )
         }
@@ -467,13 +464,16 @@ private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) 
 
 @Composable
 private fun RecommendationLoading() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(160.dp),
-        contentAlignment = Alignment.Center,
+    Row(
+        modifier = Modifier.fillMaxWidth().height(188.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CircularProgressIndicator()
+        repeat(3) {
+            ShimmerBox(
+                modifier = Modifier.weight(1f).height(188.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+            )
+        }
     }
 }
 

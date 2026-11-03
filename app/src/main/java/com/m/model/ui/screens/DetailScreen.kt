@@ -40,7 +40,6 @@ import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -85,6 +84,7 @@ import com.m.model.ui.components.InfoRow
 import com.m.model.ui.components.LetterAvatar
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.SectionHeader
+import com.m.model.ui.components.ShimmerBox
 import com.m.model.ui.components.fitColors
 import com.m.model.ui.components.fitIcon
 import com.m.model.ui.components.fitLabel
@@ -178,21 +178,42 @@ fun DetailScreen(
             }
 
             card == null -> {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
+                        .padding(padding)
+                        .padding(20.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        CircularProgressIndicator()
-                        Text(
-                            text = "Reading model card…",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ShimmerBox(
+                            modifier = Modifier.size(68.dp),
+                            shape = RoundedCornerShape(22.dp),
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            ShimmerBox(modifier = Modifier.fillMaxWidth(0.6f).height(24.dp))
+                            ShimmerBox(modifier = Modifier.fillMaxWidth(0.35f).height(14.dp))
+                        }
+                    }
+                    ShimmerBox(
+                        modifier = Modifier.fillMaxWidth().height(150.dp),
+                        shape = MaterialTheme.shapes.large,
+                    )
+                    ShimmerBox(
+                        modifier = Modifier.fillMaxWidth().height(96.dp),
+                        shape = MaterialTheme.shapes.large,
+                    )
+                    repeat(3) {
+                        ShimmerBox(
+                            modifier = Modifier.fillMaxWidth().height(74.dp),
+                            shape = MaterialTheme.shapes.large,
                         )
                     }
                 }

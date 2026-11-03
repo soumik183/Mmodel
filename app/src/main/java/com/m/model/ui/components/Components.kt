@@ -1,6 +1,11 @@
 package com.m.model.ui.components
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -29,10 +35,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -345,6 +354,101 @@ fun InfoRow(
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.End,
+        )
+    }
+}
+
+/** A block whose background sweeps a highlight forever; the skeleton building block. */
+@Composable
+fun ShimmerBox(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(16.dp),
+) {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val offset by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_100, easing = LinearEasing),
+        ),
+        label = "shimmerShift",
+    )
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    val highlight = MaterialTheme.colorScheme.surfaceContainerHighest
+    Box(
+        modifier = modifier
+            .background(track, shape)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(track, highlight, track),
+                    start = Offset(offset - 280f, 0f),
+                    end = Offset(offset, 0f),
+                ),
+                shape,
+            )
+            .clip(shape),
+    )
+}
+
+/** Card-shaped skeleton for model rows. */
+@Composable
+fun ModelRowSkeleton(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            ShimmerBox(
+                modifier = Modifier.size(56.dp),
+                shape = RoundedCornerShape(18.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ShimmerBox(modifier = Modifier.fillMaxWidth(0.62f).height(16.dp))
+                ShimmerBox(modifier = Modifier.fillMaxWidth(0.4f).height(12.dp))
+                ShimmerBox(modifier = Modifier.width(132.dp).height(18.dp))
+            }
+        }
+    }
+}
+
+/** Icon button whose icon rotates while [spinning] and that blocks re-taps. */
+@Composable
+fun SpinningIconButton(
+    imageVector: ImageVector,
+    contentDescription: String,
+    spinning: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val rotation by rememberInfiniteTransition(label = "reloadSpin").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+        ),
+        label = "reloadRotation",
+    )
+    IconButton(
+        onClick = onClick,
+        enabled = !spinning,
+        modifier = modifier,
+    ) {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            modifier = Modifier.rotate(if (spinning) rotation else 0f),
         )
     }
 }
