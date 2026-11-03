@@ -113,7 +113,7 @@ fun FolderScreen(rootPath: String, onBack: () -> Unit) {
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
-                    overflow = TextOverflow.MiddleEllipsis,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             IconButton(onClick = { reload++ }) {
@@ -258,7 +258,7 @@ private fun FileRow(entry: FolderEntry, onClick: () -> Unit) {
                     text = entry.name,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = entry.relativePath.substringBeforeLast('/', "")
@@ -267,7 +267,7 @@ private fun FileRow(entry: FolderEntry, onClick: () -> Unit) {
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(

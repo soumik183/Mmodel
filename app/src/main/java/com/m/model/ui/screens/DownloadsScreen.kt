@@ -700,7 +700,7 @@ private fun ChangeFolderDialog(
     onDismiss: () -> Unit,
 ) {
     var folderPath by remember {
-        mutableStateOf(vm.customDownloadRoot() ?: "/storage/emulated/0/Download/Mmodel")
+        mutableStateOf(vm.customDownloadRoot ?: "/storage/emulated/0/Download/Mmodel")
     }
     var folderError by remember { mutableStateOf<String?>(null) }
     var allFilesAccess by remember { mutableStateOf(vm.hasAllFilesAccess()) }
