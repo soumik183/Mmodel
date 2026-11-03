@@ -1,6 +1,6 @@
 package com.m.model.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility as MessageAnimatedVisibility
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -218,20 +218,14 @@ fun ChatScreen(
                                     key = { it.id },
                                     contentType = { "message" },
                                 ) { message ->
-                                    MessageAnimatedVisibility(
-                                        visible = true,
-                                        enter = fadeIn(animationSpec = tween(220)) +
-                                            slideInVertically(animationSpec = tween(220)) { it / 4 },
-                                    ) {
-                                        ChatBubble(
-                                            message = message,
-                                            canRegenerate = message.role == ChatRole.ASSISTANT &&
-                                                !message.streaming &&
-                                                !state.generating &&
-                                                message.id == state.messages.lastOrNull()?.id,
-                                            onRegenerate = vm::regenerate,
-                                        )
-                                    }
+                                    MessageEntrance(
+                                        message = message,
+                                        canRegenerate = message.role == ChatRole.ASSISTANT &&
+                                            !message.streaming &&
+                                            !state.generating &&
+                                            message.id == state.messages.lastOrNull()?.id,
+                                        onRegenerate = vm::regenerate,
+                                    )
                                 }
                                 item { Spacer(Modifier.height(4.dp)) }
                             }
@@ -895,6 +889,27 @@ private fun Suggestion(text: String, onClick: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
+    }
+}
+
+/** Entrance wrapper for a bubble; top-level so scope-receiver overloads of
+ * AnimatedVisibility do not shadow the one we want. */
+@Composable
+private fun MessageEntrance(
+    message: ChatMessage,
+    canRegenerate: Boolean,
+    onRegenerate: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = true,
+        enter = fadeIn(animationSpec = tween(220)) +
+            slideInVertically(animationSpec = tween(220)) { it / 4 },
+    ) {
+        ChatBubble(
+            message = message,
+            canRegenerate = canRegenerate,
+            onRegenerate = onRegenerate,
+        )
     }
 }
 
