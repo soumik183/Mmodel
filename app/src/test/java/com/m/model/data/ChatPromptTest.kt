@@ -70,6 +70,31 @@ class ChatPromptTest {
     }
 
     @Test
+    fun mistralEmitsBosOnceAndAlternatingTurns() {
+        val prompt = ChatPrompt.fallback(
+            "mistralai/Mistral-7B-Instruct-v0.2",
+            "Be brief.",
+            turns,
+        )
+
+        assertEquals(1, "<s>".toRegex().findAll(prompt).count())
+        assertTrue(prompt.startsWith("<s>[INST] "))
+        assertTrue(prompt.contains("Hello [/INST]"))
+        assertTrue(prompt.contains("</s>[INST] What is a GGUF? [/INST]"))
+    }
+
+    @Test
+    fun oversizedLastMessageKeepsTheTail() {
+        val long = listOf(ChatTurn("user", "a".repeat(200) + " THE QUESTION"))
+
+        val trimmed = ChatPrompt.trimHistory(long, maxChars = 100)
+
+        assertEquals(1, trimmed.size)
+        assertEquals(100, trimmed.single().content.length)
+        assertTrue(trimmed.single().content.endsWith("THE QUESTION"))
+    }
+
+    @Test
     fun nativeMessagesIncludeRolesInOrder() {
         val messages = ChatPrompt.nativeMessages("System", turns)
 

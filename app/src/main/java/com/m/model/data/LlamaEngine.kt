@@ -2,6 +2,7 @@ package com.m.model.data
 
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.system.Os
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,7 +15,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.nehuatl.llamacpp.LlamaContext
 import java.io.File
-import java.io.FileInputStream
 import java.io.IOException
 import kotlin.math.absoluteValue
 import kotlin.random.Random
@@ -67,10 +67,6 @@ class LlamaEngine {
             if (!file.isFile) {
                 throw EngineFailure("The model file is missing. Download it again.")
             }
-            if (!hasGgufHeader(file)) {
-                throw EngineFailure("This file is not a valid GGUF model.")
-            }
-
             val opened = ParcelFileDescriptor.open(
                 file,
                 ParcelFileDescriptor.MODE_READ_ONLY,
@@ -103,6 +99,10 @@ class LlamaEngine {
 
         val threads = defaultThreads()
         val chosenContextLength = contextLength.coerceIn(512, 4_096)
+        validateGgufHeader(opened)?.let { reason ->
+            runCatching { opened.close() }
+            throw EngineFailure(reason)
+        }
         try {
             val context = LlamaContext(
                 Random.nextInt().absoluteValue,
@@ -229,16 +229,30 @@ class LlamaEngine {
         }
     }
 
-    private fun hasGgufHeader(file: File): Boolean = runCatching {
-        FileInputStream(file).use { input ->
-            val header = ByteArray(4)
-            input.read(header) == 4 &&
-                header[0] == 'G'.code.toByte() &&
-                header[1] == 'G'.code.toByte() &&
-                header[2] == 'U'.code.toByte() &&
-                header[3] == 'F'.code.toByte()
+    /**
+     * Reads the GGUF magic and little-endian version, or null when the engine
+     * should decide. Providers without positioned reads return null so the load
+     * path still works for them.
+     */
+    private fun validateGgufHeader(opened: ParcelFileDescriptor): String? {
+        val header = runCatching {
+            ByteArray(8).also { buffer ->
+                Os.pread(opened.fileDescriptor, buffer, 0, buffer.size, 0L)
+            }
+        }.getOrNull() ?: return null
+
+        if (String(header, 0, 4, Charsets.US_ASCII) != "GGUF") {
+            return "This file is not a valid GGUF model."
         }
-    }.getOrDefault(false)
+        val version = (header[4].toInt() and 0xFF) or
+            ((header[5].toInt() and 0xFF) shl 8) or
+            ((header[6].toInt() and 0xFF) shl 16) or
+            ((header[7].toInt() and 0xFF) shl 24)
+        if (version < 2) {
+            return "This GGUF is too old (version $version). Re-export it with a newer tool."
+        }
+        return null
+    }
 
     private fun defaultThreads(): Int {
         val cores = Runtime.getRuntime().availableProcessors()

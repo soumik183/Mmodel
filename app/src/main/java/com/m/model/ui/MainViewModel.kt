@@ -265,7 +265,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     sort = sort,
                     category = category,
                     limit = PAGE_SIZE,
-                    withGguf = true,
                 )
                 if (browseEpoch != epoch) return@launch
 
@@ -305,7 +304,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     category = current.category,
                     limit = PAGE_SIZE,
                     skip = current.nextOffset,
-                    withGguf = true,
                 )
                 if (browseEpoch != epoch) return@launch
 
@@ -341,7 +339,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             hydrate(unknown.map { it.id }, 8) { card ->
                 if (browseEpoch == epoch) {
-                    cache[card.id] = card
+                    cacheCard(card)
                     browse = browse.copy(
                         items = browse.items.map { if (it.id == card.id) card else it },
                     )
@@ -381,12 +379,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val detailed = hydrate(candidates.map { it.id }, 24) { card ->
                     if (recommendationsEpoch == epoch) {
-                        cache[card.id] = card
+                        cacheCard(card)
                         recommendations = recommendationPicks(recommendations + card)
                     }
                 }
                 if (recommendationsEpoch != epoch) return@launch
-                cache.putAll(detailed.associateBy { it.id })
+                detailed.forEach { cacheCard(it) }
                 recommendations = recommendationPicks(detailed)
             } catch (e: CancellationException) {
                 throw e
@@ -450,7 +448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?: browse.items.firstOrNull { it.id == id }
             ?: recommendations.firstOrNull { it.id == id }
         if (seeded != null) {
-            cache[id] = seeded
+            cacheCard(seeded)
             if (detail.id != id || detail.card == null) {
                 detail = DetailState(id = id, card = seeded)
             }
@@ -464,8 +462,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun needsDetail(card: ModelCard): Boolean =
-        card.model.siblings.isEmpty() ||
-            (card.variants.isEmpty() && card.downloadBytes == null)
+        card.model.siblings.isEmpty() || card.variants.none { it.bytes > 0L }
 
     private fun refreshDetail(id: String) {
         if (detailFetchingId == id) return
@@ -474,7 +471,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         detailJob = viewModelScope.launch {
             try {
                 val card = analyze(api.getModel(id))
-                cache[id] = card
+                cacheCard(card)
                 if (detail.id == id) detail = DetailState(id = id, card = card)
             } catch (e: CancellationException) {
                 throw e
@@ -1101,6 +1098,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun analyze(model: HfModel): ModelCard = ModelFit.analyze(model, device)
 
+    /** Keeps the card cache bounded so long sessions cannot grow it unbounded. */
+    private fun cacheCard(card: ModelCard) {
+        if (cache.size >= MAX_CACHE_ENTRIES && !cache.containsKey(card.id)) {
+            cache.remove(cache.keys.first())
+        }
+        cache[card.id] = card
+    }
+
     private fun score(card: ModelCard): Double {
         val downloads = (card.model.downloads ?: 0L).coerceAtLeast(0L)
         val likes = (card.model.likes ?: 0L).coerceAtLeast(0L)
@@ -1140,6 +1145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val KEY_LAST_MODEL = "last_model"
         const val PAGE_SIZE = 20
+        const val MAX_CACHE_ENTRIES = 64
         const val SPLIT_UNSUPPORTED =
             "Split GGUFs (multiple files) can't run on this phone's engine. Pick a single-file quant."
         val SHARD_NAME = Regex("""-\d{5}-of-\d{5}\.gguf$""", RegexOption.IGNORE_CASE)

@@ -24,11 +24,12 @@ object ChatPrompt {
             chars += turn.content.length
         }
 
-        if (kept.isEmpty()) {
-            val last = turns.last()
-            return listOf(
-                last.copy(content = last.content.take(maxChars.coerceAtLeast(1))),
-            )
+        // A lone oversized message is kept whole by the loop above; keep its tail,
+        // which is where the actual question lives.
+        val first = kept.firstOrNull()
+        if (first != null && first.content.length > maxChars) {
+            kept.removeFirst()
+            kept.addFirst(first.copy(content = first.content.takeLast(maxChars)))
         }
 
         return withoutLeadingAssistant(kept.toList())
@@ -121,16 +122,20 @@ object ChatPrompt {
 
     private fun mistral(system: String, turns: List<ChatTurn>): String {
         val sb = StringBuilder()
-        var firstUser = true
+        var firstTurn = true
         turns.forEach { turn ->
             when (turn.role) {
                 "user" -> {
-                    sb.append("<s>[INST] ")
-                    if (firstUser && system.isNotBlank()) {
-                        sb.append(system).append("\n\n")
+                    if (firstTurn) {
+                        sb.append("<s>[INST] ")
+                        if (system.isNotBlank()) {
+                            sb.append(system).append("\n\n")
+                        }
+                        firstTurn = false
+                    } else {
+                        sb.append("[INST] ")
                     }
                     sb.append(turn.content).append(" [/INST]")
-                    firstUser = false
                 }
 
                 "assistant" -> sb.append(" ").append(turn.content).append("</s>")

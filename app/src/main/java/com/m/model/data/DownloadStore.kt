@@ -273,7 +273,10 @@ class DownloadStore(context: Context) {
                 activeJob?.cancel()
             }
         }
-        markStatus(recordId, DownloadStatus.PAUSED, null)
+        val current = _records.value.firstOrNull { it.id == recordId } ?: return
+        if (current.status == DownloadStatus.DOWNLOADING) {
+            markStatus(recordId, DownloadStatus.PAUSED, null)
+        }
     }
 
     fun delete(recordId: String, scope: CoroutineScope) {
@@ -594,15 +597,55 @@ class DownloadStore(context: Context) {
             .build()
 
     private fun load() {
-        val saved = runCatching {
-            manifest.takeIf { it.isFile }?.readText()?.let {
-                json.decodeFromString<List<DownloadRecord>>(it)
-            }
-        }.getOrNull() ?: emptyList()
+        val text = runCatching {
+            manifest.takeIf { it.isFile }?.readText()?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+
+        val saved = if (text == null) {
+            emptyList()
+        } else {
+            // One corrupt record must not wipe every download on this phone.
+            runCatching { json.decodeFromString<List<DownloadRecord>>(text) }.getOrNull()
+                ?: splitTopLevelObjects(text).mapNotNull { chunk ->
+                    runCatching { json.decodeFromString<DownloadRecord>(chunk) }.getOrNull()
+                }
+        }
 
         val normalized = saved.map { normalize(it) }
         _records.value = normalized
         if (normalized != saved) persist()
+    }
+
+    /** Top-level objects of a JSON array, brace- and string-aware. */
+    private fun splitTopLevelObjects(raw: String): List<String> {
+        val result = mutableListOf<String>()
+        var depth = 0
+        var start = -1
+        var inString = false
+        var escaped = false
+        for (i in raw.indices) {
+            val c = raw[i]
+            when {
+                inString -> when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = false
+                }
+                c == '"' -> inString = true
+                c == '{' -> {
+                    if (depth == 0) start = i
+                    depth++
+                }
+                c == '}' -> {
+                    depth--
+                    if (depth == 0 && start >= 0) {
+                        result += raw.substring(start, i + 1)
+                        start = -1
+                    }
+                }
+            }
+        }
+        return result
     }
 
     private fun normalize(record: DownloadRecord): DownloadRecord {
@@ -613,7 +656,8 @@ class DownloadStore(context: Context) {
             val target = File(record.dirPath, file.localName)
             val part = File(record.dirPath, file.localName + ".part")
             when {
-                target.isFile && (file.bytesTotal <= 0L || target.length() == file.bytesTotal) ->
+                target.isFile && target.length() > 0L &&
+                    (file.bytesTotal <= 0L || target.length() == file.bytesTotal) ->
                     file.copy(bytesDone = target.length(), done = true)
 
                 target.isFile -> file.copy(bytesDone = target.length(), done = false)
