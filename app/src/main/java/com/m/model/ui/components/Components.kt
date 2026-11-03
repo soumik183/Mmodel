@@ -194,7 +194,7 @@ fun FitBadge(fit: Fit, modifier: Modifier = Modifier) {
         shape = RoundedCornerShape(50),
         color = background,
         contentColor = content,
-        border = BorderStroke(1.dp, content.copy(alpha = 0.08f)),
+        border = BorderStroke(1.dp, content.copy(alpha = 0.14f)),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
@@ -203,7 +203,7 @@ fun FitBadge(fit: Fit, modifier: Modifier = Modifier) {
             Icon(
                 imageVector = fitIcon(fit),
                 contentDescription = null,
-                modifier = Modifier.size(13.dp),
+                modifier = Modifier.size(14.dp),
             )
             Spacer(Modifier.width(5.dp))
             Text(

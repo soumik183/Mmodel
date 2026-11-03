@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -205,6 +206,13 @@ private fun MmodelBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .height(54.dp)
+                    .then(
+                        if (active) {
+                            Modifier.shadow(8.dp, RoundedCornerShape(24.dp), clip = false)
+                        } else {
+                            Modifier
+                        },
+                    )
                     .clip(RoundedCornerShape(24.dp))
                     .background(background)
                     .selectable(

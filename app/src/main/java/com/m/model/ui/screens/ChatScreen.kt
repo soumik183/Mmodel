@@ -1,9 +1,13 @@
 package com.m.model.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.RepeatMode
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -71,6 +75,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -921,6 +926,13 @@ private fun ChatBubble(
 ) {
     val clipboard = LocalClipboardManager.current
     val user = message.role == ChatRole.USER
+    val cursorTransition = rememberInfiniteTransition(label = "cursorBlink")
+    val cursorAlpha by cursorTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.1f,
+        animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
+        label = "cursorAlpha",
+    )
     val shape = if (user) {
         RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomEnd = 8.dp, bottomStart = 22.dp)
     } else {
@@ -973,15 +985,36 @@ private fun ChatBubble(
                         )
                     }
                     SelectionContainer {
-                        Text(
-                            text = when {
-                                message.streaming && message.text.isBlank() -> "Thinking…"
-                                message.streaming -> message.text + "▍"
-                                message.text.isBlank() -> "Stopped."
-                                else -> message.text
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        when {
+                            message.streaming && message.text.isBlank() ->
+                                Text(
+                                    text = "Thinking…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+
+                            message.streaming -> Row {
+                                Text(
+                                    text = message.text,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = "▍",
+                                    modifier = Modifier.alpha(cursorAlpha),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+
+                            message.text.isBlank() ->
+                                Text(
+                                    text = "Stopped.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+
+                            else -> Text(
+                                text = message.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     }
                     message.meta?.let { meta ->
                         Text(

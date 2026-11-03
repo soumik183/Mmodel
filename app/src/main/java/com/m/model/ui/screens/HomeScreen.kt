@@ -1,5 +1,9 @@
 package com.m.model.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -348,11 +352,16 @@ private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) 
     // as a narrow phone card or a wide tablet card.
     val compact = width < 300.dp
     val padding = if (compact) 14.dp else 16.dp
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .width(width)
-            .heightIn(min = if (compact) 178.dp else 192.dp),
+    AnimatedVisibility(
+        visible = true,
+        enter = fadeIn(animationSpec = tween(350)) +
+            slideInVertically(animationSpec = tween(350)) { it / 5 },
+    ) {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier
+                .width(width)
+                .heightIn(min = if (compact) 178.dp else 192.dp),
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -452,6 +461,7 @@ private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) 
                 )
             }
         }
+    }
     }
 }
 
