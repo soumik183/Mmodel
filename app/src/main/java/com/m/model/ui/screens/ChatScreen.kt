@@ -1,6 +1,6 @@
 package com.m.model.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibility as MessageAnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -218,7 +218,7 @@ fun ChatScreen(
                                     key = { it.id },
                                     contentType = { "message" },
                                 ) { message ->
-                                    AnimatedVisibility(
+                                    MessageAnimatedVisibility(
                                         visible = true,
                                         enter = fadeIn(animationSpec = tween(220)) +
                                             slideInVertically(animationSpec = tween(220)) { it / 4 },
