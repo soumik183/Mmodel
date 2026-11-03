@@ -64,6 +64,7 @@ import com.m.model.data.Fit
 import com.m.model.data.ModelFit
 import com.m.model.ui.MainViewModel
 import com.m.model.ui.components.FitBadge
+import com.m.model.ui.components.InfoNotice
 import com.m.model.ui.components.LetterAvatar
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.SectionHeader
@@ -143,7 +144,7 @@ fun DownloadsScreen(
 
         vm.downloadNotice?.let { notice ->
             item {
-                NoticeCard(text = notice, onDismiss = vm::clearDownloadNotice)
+                InfoNotice(text = notice, onDismiss = vm::clearDownloadNotice)
             }
         }
 
@@ -324,30 +325,6 @@ private fun StorageCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.84f),
             )
-        }
-    }
-}
-
-@Composable
-private fun NoticeCard(text: String, onDismiss: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = text,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            TextButton(onClick = onDismiss) {
-                Text("Dismiss")
-            }
         }
     }
 }

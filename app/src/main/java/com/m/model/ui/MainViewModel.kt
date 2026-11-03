@@ -137,6 +137,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var downloadNotice by mutableStateOf<String?>(null)
         private set
 
+    /** Draft chat text lives in the view model so leaving and re-entering the tab keeps it. */
+    var chatInput by mutableStateOf("")
+        private set
+
     private val engine = LlamaEngine()
     private val chatPreferences = application.getSharedPreferences("chat", 0)
     private val _chat = MutableStateFlow(ChatState())
@@ -561,6 +565,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearDownloadNotice() {
         downloadNotice = null
+    }
+
+    fun onChatInputChange(value: String) {
+        if (value.length <= 4_000) chatInput = value
+    }
+
+    fun clearChatInput() {
+        chatInput = ""
+    }
+
+    fun dismissChatError() {
+        _chat.update { it.copy(error = null) }
     }
 
     fun importLocalModel(uri: Uri) {

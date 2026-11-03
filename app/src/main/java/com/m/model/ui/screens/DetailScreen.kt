@@ -80,6 +80,7 @@ import com.m.model.data.ModelCard
 import com.m.model.data.ModelFit
 import com.m.model.ui.MainViewModel
 import com.m.model.ui.components.FitBadge
+import com.m.model.ui.components.InfoNotice
 import com.m.model.ui.components.InfoRow
 import com.m.model.ui.components.LetterAvatar
 import com.m.model.ui.components.MessageCard
@@ -495,7 +496,7 @@ private fun DetailContent(
 
         downloadNotice?.let { notice ->
             item {
-                DownloadNoticeCard(text = notice, onDismiss = onClearNotice)
+                InfoNotice(text = notice, onDismiss = onClearNotice)
             }
         }
 
@@ -809,30 +810,6 @@ private fun VariantCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadNoticeCard(text: String, onDismiss: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = text,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            TextButton(onClick = onDismiss) {
-                Text("Dismiss")
             }
         }
     }

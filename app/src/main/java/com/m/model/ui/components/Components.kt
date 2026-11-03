@@ -349,6 +349,35 @@ fun InfoRow(
     }
 }
 
+/**
+ * One-line notice used for download feedback across screens: a primary-tinted
+ * banner with a Dismiss action. Callers decide placement; not a full card so
+ * it can sit above or inside lists.
+ */
+@Composable
+fun InfoNotice(text: String, modifier: Modifier = Modifier, onDismiss: () -> Unit) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss")
+            }
+        }
+    }
+}
+
 @Composable
 fun MetaItem(icon: ImageVector, text: String, modifier: Modifier = Modifier) {
     Row(

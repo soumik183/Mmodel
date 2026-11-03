@@ -372,7 +372,7 @@ fun BrowseScreen(
                         .padding(20.dp),
                 ) {
                     val hasFilters = state.query.isNotBlank() ||
-                        state.category != com.m.model.data.ModelCategory.GGUF
+                        state.category != ModelCategory.GGUF
                     MessageCard(
                         icon = Icons.Rounded.Search,
                         title = "No models found",
@@ -385,7 +385,7 @@ fun BrowseScreen(
                         onAction = if (hasFilters) {
                             {
                                 vm.onQueryChange("")
-                                vm.setCategory(com.m.model.data.ModelCategory.GGUF)
+                                vm.setCategory(ModelCategory.GGUF)
                             }
                         } else {
                             null

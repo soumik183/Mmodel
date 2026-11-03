@@ -275,10 +275,16 @@ private fun HeroCard(device: DeviceSpecs, onExplore: () -> Unit) {
                     modifier = Modifier
                         .size(7.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF7DEBDF)),
+                        .background(
+                            if (device.canRunLocalChat) Color(0xFF7DEBDF) else Color(0xFFF3C56B),
+                        ),
                 )
                 Text(
-                    text = "DEVICE READY",
+                    text = if (device.canRunLocalChat) {
+                        "CHAT READY ON THIS PHONE"
+                    } else {
+                        "BROWSE ONLY · LOCAL CHAT NEEDS ARM64"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White.copy(alpha = 0.82f),
                     letterSpacing = 1.8.sp,

@@ -1,5 +1,9 @@
 package com.m.model.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -30,6 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -63,7 +68,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,6 +88,7 @@ import com.m.model.ui.ChatRole
 import com.m.model.ui.ChatState
 import com.m.model.ui.MainViewModel
 import com.m.model.ui.components.FitBadge
+import com.m.model.ui.components.InfoNotice
 import com.m.model.ui.components.LetterAvatar
 import com.m.model.ui.components.MessageCard
 import com.m.model.ui.components.SectionHeader
@@ -102,7 +107,7 @@ fun ChatScreen(
     val device = vm.device
     val downloaded = records.filter { it.isComplete }
     val selected = records.firstOrNull { it.id == state.recordId }
-    var input by rememberSaveable { mutableStateOf("") }
+    val input = vm.chatInput
     var modelMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val importLauncher = rememberLauncherForActivityResult(
@@ -134,7 +139,7 @@ fun ChatScreen(
         val text = input.trim()
         if (text.isNotEmpty() && state.ready && !state.generating) {
             vm.sendMessage(text)
-            input = ""
+            vm.clearChatInput()
         }
     }
 
@@ -144,28 +149,11 @@ fun ChatScreen(
             .imePadding(),
     ) {
         vm.downloadNotice?.let { notice ->
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-                Row(
-                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = notice,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = vm::clearDownloadNotice) {
-                        Text("Dismiss")
-                    }
-                }
-            }
+            InfoNotice(
+                text = notice,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                onDismiss = vm::clearDownloadNotice,
+            )
         }
         ChatHeader(
             state = state,
@@ -230,14 +218,20 @@ fun ChatScreen(
                                     key = { it.id },
                                     contentType = { "message" },
                                 ) { message ->
-                                    ChatBubble(
-                                        message = message,
-                                        canRegenerate = message.role == ChatRole.ASSISTANT &&
-                                            !message.streaming &&
-                                            !state.generating &&
-                                            message.id == state.messages.lastOrNull()?.id,
-                                        onRegenerate = vm::regenerate,
-                                    )
+                                    AnimatedVisibility(
+                                        visible = true,
+                                        enter = fadeIn(animationSpec = tween(220)) +
+                                            slideInVertically(animationSpec = tween(220)) { it / 4 },
+                                    ) {
+                                        ChatBubble(
+                                            message = message,
+                                            canRegenerate = message.role == ChatRole.ASSISTANT &&
+                                                !message.streaming &&
+                                                !state.generating &&
+                                                message.id == state.messages.lastOrNull()?.id,
+                                            onRegenerate = vm::regenerate,
+                                        )
+                                    }
                                 }
                                 item { Spacer(Modifier.height(4.dp)) }
                             }
@@ -264,7 +258,7 @@ fun ChatScreen(
                     }
 
                     state.error?.let { error ->
-                        InlineError(text = error)
+                        InlineError(text = error, onDismiss = vm::dismissChatError)
                     }
                     state.status?.let { status ->
                         Text(
@@ -277,7 +271,7 @@ fun ChatScreen(
 
                     ChatInput(
                         value = input,
-                        onValueChange = { if (it.length <= 4_000) input = it },
+                        onValueChange = vm::onChatInputChange,
                         onSend = submit,
                         generating = state.generating,
                         stopping = state.stopping,
@@ -1148,7 +1142,7 @@ private fun Metric(label: String, value: String, modifier: Modifier = Modifier) 
 }
 
 @Composable
-private fun InlineError(text: String) {
+private fun InlineError(text: String, onDismiss: (() -> Unit)? = null) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1158,8 +1152,8 @@ private fun InlineError(text: String) {
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.Top,
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(
@@ -1169,8 +1163,18 @@ private fun InlineError(text: String) {
             )
             Text(
                 text = text,
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (onDismiss != null) {
+                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Dismiss error",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
         }
     }
 }
