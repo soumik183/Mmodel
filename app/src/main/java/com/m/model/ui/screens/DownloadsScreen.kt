@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -95,7 +97,6 @@ fun DownloadsScreen(
     var deleteTarget by remember { mutableStateOf<DownloadRecord?>(null) }
     var browseMode by remember { mutableStateOf(false) }
     var folderDialog by remember { mutableStateOf(false) }
-    var folderPicker by remember { mutableStateOf(false) }
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -108,19 +109,6 @@ fun DownloadsScreen(
 
     if (browseMode) {
         FolderScreen(rootPath = vm.downloadsRootPath, onBack = { browseMode = false })
-        return
-    }
-
-    if (folderPicker) {
-        FolderPickerScreen(
-            initialPath = vm.downloadsRootPath,
-            onBack = { folderPicker = false },
-            onUse = { path ->
-                val error = vm.setDownloadRoot(path)
-                if (error == null) folderPicker = false
-                error
-            },
-        )
         return
     }
 
@@ -266,10 +254,6 @@ fun DownloadsScreen(
         ChangeFolderDialog(
             vm = vm,
             onDismiss = { folderDialog = false },
-            onBrowse = {
-                folderDialog = false
-                folderPicker = true
-            },
         )
     }
 }
@@ -743,19 +727,54 @@ private fun copyPath(context: Context, path: String) {
 }
 
 /**
+ * Maps a SAF tree URI such as tree/primary:Download/Mmodel to the plain file
+ * path the app uses for downloads. Works for the primary volume and removable
+ * volumes mounted at /storage/<uuid>; returns null for anything else.
+ */
+private fun treeUriToPath(uri: Uri): String? = runCatching {
+    val docId = DocumentsContract.getTreeDocumentId(uri)
+    val volume = docId.substringBefore(':')
+    val relative = docId.substringAfter(':', "")
+    val root = if (volume.equals("primary", ignoreCase = true)) {
+        Environment.getExternalStorageDirectory().absolutePath
+    } else {
+        "/storage/$volume"
+    }
+    if (relative.isBlank()) root else "$root/$relative"
+}.getOrNull()
+
+/**
  * Pick where new downloads go. All Files Access is required because the app
  * writes plain files and validates the folder with a real write/delete probe
- * before accepting it. Shows the current folder first; "Browse storage" hands
- * off to the full-screen folder picker.
+ * before accepting it. Shows the current folder first; "Choose folder" hands
+ * off to Android's system folder picker (OpenDocumentTree).
  */
 @Composable
 private fun ChangeFolderDialog(
     vm: MainViewModel,
     onDismiss: () -> Unit,
-    onBrowse: () -> Unit,
 ) {
     var allFilesAccess by remember { mutableStateOf(vm.hasAllFilesAccess()) }
+    var folderError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val path = treeUriToPath(uri)
+        if (path == null) {
+            folderError = "That folder cannot be used for downloads. Pick a folder on shared storage."
+            return@rememberLauncherForActivityResult
+        }
+        val error = vm.setDownloadRoot(path)
+        if (error == null) {
+            folderError = null
+            onDismiss()
+        } else {
+            folderError = error
+        }
+    }
 
     val settingsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -846,7 +865,13 @@ private fun ChangeFolderDialog(
                         }
                     }
                     Button(
-                        onClick = onBrowse,
+                        onClick = {
+                            folderError = null
+                            val launched = runCatching { folderPickerLauncher.launch(null) }.isSuccess
+                            if (!launched) {
+                                folderError = "No file picker is available on this device."
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(
@@ -855,10 +880,17 @@ private fun ChangeFolderDialog(
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Browse storage…")
+                        Text("Choose folder…")
+                    }
+                    folderError?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
                     }
                     Text(
-                        text = "Opens the full storage on this phone. Tap folders to go deeper, then use the folder you land in.",
+                        text = "Opens Android's storage picker. Open the folder you want and tap “Use this folder”.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
