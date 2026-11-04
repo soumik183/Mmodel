@@ -119,7 +119,7 @@ class LlamaEngine {
         }
         try {
             val context = LlamaContext(
-                System.nanoTime().absoluteValue,
+                System.nanoTime().absoluteValue.toInt(),
                 mapOf(
                     "model" to label,
                     "model_fd" to opened.fd,
@@ -180,12 +180,12 @@ class LlamaEngine {
                         "prompt" to prompt,
                         "emit_partial_completion" to true,
                         "n_predict" to maxTokens.coerceIn(1, 1_024),
-                        "temperature" to sampling["temperature"],
-                        "top_k" to sampling["top_k"],
-                        "top_p" to sampling["top_p"],
-                        "min_p" to sampling["min_p"],
-                        "penalty_last_n" to sampling["penalty_last_n"],
-                        "penalty_repeat" to sampling["penalty_repeat"],
+                        "temperature" to sampling.getValue("temperature"),
+                        "top_k" to sampling.getValue("top_k"),
+                        "top_p" to sampling.getValue("top_p"),
+                        "min_p" to sampling.getValue("min_p"),
+                        "penalty_last_n" to sampling.getValue("penalty_last_n"),
+                        "penalty_repeat" to sampling.getValue("penalty_repeat"),
                     ),
                 )
                 GenerationResult(tokens, System.currentTimeMillis() - started)

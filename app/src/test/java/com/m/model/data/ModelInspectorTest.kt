@@ -1,6 +1,10 @@
 package com.m.model.data
 
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ModelInspectorTest {
@@ -20,6 +24,57 @@ class ModelInspectorTest {
         bytes[4] = 3; bytes[5] = 0; bytes[6] = 0; bytes[7] = 0
         val header = parseGgufHeader(bytes)
         assertEquals(3, header?.version)
+    }
+
+    private fun sampleGguf(): ByteArray {
+        val arch = "llama".toByteArray(Charsets.UTF_8)
+        val ctxKey = "llama.context_length".toByteArray(Charsets.UTF_8)
+        val archKey = "general.architecture".toByteArray(Charsets.UTF_8)
+        val buf = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN)
+        buf.put("GGUF".toByteArray(Charsets.US_ASCII))
+        buf.putInt(3) // version
+        buf.putLong(0) // tensor count
+        buf.putLong(2) // metadata kv count
+        // kv 1: general.architecture = STRING "llama"
+        buf.putLong(archKey.size.toLong())
+        buf.put(archKey)
+        buf.putInt(8) // GGUF_TYPE_STRING
+        buf.putLong(arch.size.toLong())
+        buf.put(arch)
+        // kv 2: llama.context_length = UINT32 4096
+        buf.putLong(ctxKey.size.toLong())
+        buf.put(ctxKey)
+        buf.putInt(4) // GGUF_TYPE_UINT32
+        buf.putInt(4096)
+        return buf.array().copyOf(buf.position())
+    }
+
+    @Test
+    fun ggufMetadataArchitectureAndContextAreParsed() {
+        val header = parseGgufHeader(sampleGguf())
+        assertEquals("llama", header?.architecture)
+        assertEquals(4096L, header?.contextLength)
+    }
+
+    @Test
+    fun truncatedGgufKeepsMagicVersionResult() {
+        val truncated = sampleGguf().copyOf(20)
+        val header = parseGgufHeader(truncated)
+        assertEquals(3, header?.version)
+        assertNull(header?.architecture)
+    }
+
+    @Test
+    fun inspectFileReadsArchitectureFromDisk() {
+        val file = File.createTempFile("mmodel-test", ".gguf")
+        try {
+            file.writeBytes(sampleGguf())
+            val result = ModelInspector.inspectFile(file)
+            assertEquals("llama", result.architecture)
+            assertEquals(ChatTemplateFamily.LLAMA3, result.templateFamily)
+        } finally {
+            file.delete()
+        }
     }
 
     @Test

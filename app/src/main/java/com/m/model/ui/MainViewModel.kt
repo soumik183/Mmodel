@@ -31,6 +31,7 @@ import com.m.model.data.ModelKind
 import com.m.model.data.ModelSort
 import com.m.model.data.PerformanceProfile
 import com.m.model.data.ModelInspector
+import com.m.model.data.resolveProfile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -109,12 +110,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     private val api = HfApi()
+
     private val cache = mutableMapOf<String, ModelCard>()
     private var detailFetchingId: String? = null
+    private var detailJob: Job? = null
     private var browseEpoch = 0
     private var recommendationsJob: Job? = null
     private var recommendationsEpoch = 0
     private var browseRequested = false
+    private var searchJob: Job? = null
+    private var loadMoreJob: Job? = null
 
     var browse by mutableStateOf(BrowseState())
         private set
@@ -875,9 +880,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         _chat.update { it.copy(loadingModel = true, ready = false, error = null, status = null) }
         try {
-            val contextLength = (record.contextLength ?: 2_048L)
-                .coerceIn(512L, 2_048L)
-                .toInt()
+            val profile = resolveProfile(
+                device,
+                performanceProfile,
+                record.contextLength,
+            )
+            val inspection = if (record.isImported) {
+                null
+            } else {
+                // The header sniff can read a few MB; keep it off the calling thread
+                // and never fail a load just because inspection is impossible.
+                record.firstPath?.let { path ->
+                    withContext(Dispatchers.IO) {
+                        runCatching { ModelInspector.inspectFile(File(path)) }.getOrNull()
+                    }
+                }
+            }
             val loaded = if (record.isImported) {
                 val sourceUri = record.sourceUri
                     ?: throw IllegalStateException("Import this GGUF again.")
@@ -887,11 +905,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ?: throw IllegalStateException(
                         "Storage access expired. Import this GGUF again.",
                     )
-                engine.load(descriptor, record.modelName, contextLength)
+                engine.load(descriptor, record.modelName, profile)
             } else {
                 val path = record.firstPath
                     ?: throw IllegalStateException("The model file is missing. Download it again.")
-                engine.load(File(path), contextLength)
+                engine.load(File(path), profile)
             }
 
             if (_chat.value.recordId != record.id || chatLoadEpoch != epoch) {
@@ -911,6 +929,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     status = note,
                     contextLength = loaded.contextLength,
                     threads = loaded.threads,
+                    profileLabel = loaded.profileLabel,
+                    architecture = loaded.architecture ?: inspection?.architecture,
                 )
             }
         } catch (e: CancellationException) {
@@ -1002,10 +1022,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         content = it.text,
                     )
                 }
-            val trimmed = ChatPrompt.trimHistory(
-                history,
-                maxChars = (contextLength * 2).coerceIn(800, 6_000),
-            )
+            val trimmed = ChatPrompt.trimForContext(history, contextLength)
             val system = ChatPrompt.DEFAULT_SYSTEM
             val modelKey = record.modelId + " " + record.architecture.orEmpty()
             val prompt = engine.format(ChatPrompt.nativeMessages(system, trimmed))
@@ -1021,6 +1038,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val result = engine.generate(
                     prompt,
                     maxTokens = (contextLength / 2).coerceIn(128, 512),
+                    profile = performanceProfile,
                 ) { token ->
                     if (generationId != generation) return@generate
                     _chat.update { current ->
@@ -1234,6 +1252,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val KEY_LAST_MODEL = "last_model"
+        const val KEY_PROFILE = "profile"
         const val PAGE_SIZE = 20
         const val MAX_CACHE_ENTRIES = 64
         const val SPLIT_UNSUPPORTED =
