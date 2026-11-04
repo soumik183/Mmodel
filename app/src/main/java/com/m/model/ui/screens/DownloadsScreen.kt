@@ -10,6 +10,8 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -46,7 +49,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,6 +66,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.m.model.data.DeviceSpecs
 import com.m.model.data.DownloadRecord
 import com.m.model.data.DownloadStatus
@@ -92,6 +95,7 @@ fun DownloadsScreen(
     var deleteTarget by remember { mutableStateOf<DownloadRecord?>(null) }
     var browseMode by remember { mutableStateOf(false) }
     var folderDialog by remember { mutableStateOf(false) }
+    var folderPicker by remember { mutableStateOf(false) }
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -104,6 +108,19 @@ fun DownloadsScreen(
 
     if (browseMode) {
         FolderScreen(rootPath = vm.downloadsRootPath, onBack = { browseMode = false })
+        return
+    }
+
+    if (folderPicker) {
+        FolderPickerScreen(
+            initialPath = vm.downloadsRootPath,
+            onBack = { folderPicker = false },
+            onUse = { path ->
+                val error = vm.setDownloadRoot(path)
+                if (error == null) folderPicker = false
+                error
+            },
+        )
         return
     }
 
@@ -249,6 +266,39 @@ fun DownloadsScreen(
         ChangeFolderDialog(
             vm = vm,
             onDismiss = { folderDialog = false },
+            onBrowse = {
+                folderDialog = false
+                folderPicker = true
+            },
+        )
+    }
+}
+
+@Composable
+private fun StorageActionButton(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.24f),
+        ),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -345,40 +395,43 @@ private fun StorageCard(
                     )
                 }
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(
-                    onClick = onBrowse,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.24f),
-                    ),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Storage,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("Browse files")
-                }
-                OutlinedButton(
-                    onClick = onChangeFolder,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.24f),
-                    ),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Edit,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("Change folder")
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                // Two labelled actions do not fit comfortably on narrow screens;
+                // stack them there and keep the compact row everywhere else.
+                val stacked = maxWidth < 380.dp
+                if (stacked) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StorageActionButton(
+                            onClick = onBrowse,
+                            icon = Icons.Rounded.Storage,
+                            label = "Browse files",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        StorageActionButton(
+                            onClick = onChangeFolder,
+                            icon = Icons.Rounded.Edit,
+                            label = "Change folder",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StorageActionButton(
+                            onClick = onBrowse,
+                            icon = Icons.Rounded.Storage,
+                            label = "Browse files",
+                            modifier = Modifier.weight(1f),
+                        )
+                        StorageActionButton(
+                            onClick = onChangeFolder,
+                            icon = Icons.Rounded.Edit,
+                            label = "Change folder",
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
             OutlinedButton(
@@ -692,17 +745,15 @@ private fun copyPath(context: Context, path: String) {
 /**
  * Pick where new downloads go. All Files Access is required because the app
  * writes plain files and validates the folder with a real write/delete probe
- * before accepting it.
+ * before accepting it. Shows the current folder first; "Browse storage" hands
+ * off to the full-screen folder picker.
  */
 @Composable
 private fun ChangeFolderDialog(
     vm: MainViewModel,
     onDismiss: () -> Unit,
+    onBrowse: () -> Unit,
 ) {
-    var folderPath by remember {
-        mutableStateOf(vm.customDownloadRoot ?: "/storage/emulated/0/Download/Mmodel")
-    }
-    var folderError by remember { mutableStateOf<String?>(null) }
     var allFilesAccess by remember { mutableStateOf(vm.hasAllFilesAccess()) }
     val context = LocalContext.current
 
@@ -717,7 +768,7 @@ private fun ChangeFolderDialog(
         onDismissRequest = onDismiss,
         title = { Text("Download folder") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = "New downloads will be saved here. Models you already downloaded stay where they are.",
                     style = MaterialTheme.typography.bodySmall,
@@ -745,21 +796,69 @@ private fun ChangeFolderDialog(
                         Text("Open Settings")
                     }
                 } else {
-                    OutlinedTextField(
-                        value = folderPath,
-                        onValueChange = {
-                            folderPath = it
-                            folderError = null
-                        },
-                        label = { Text("Folder path") },
-                        placeholder = { Text("/storage/emulated/0/Download/Mmodel") },
-                        singleLine = true,
-                        isError = folderError != null,
-                        supportingText = folderError?.let { message -> { Text(message) } },
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) {
+                            Box(
+                                modifier = Modifier.size(52.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Folder,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            }
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = if (vm.isCustomDownloadRoot) {
+                                    "Current folder · Custom"
+                                } else {
+                                    "Current folder · App default"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = vm.downloadsRootPath,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        IconButton(onClick = { copyPath(context, vm.downloadsRootPath) }) {
+                            Icon(
+                                imageVector = Icons.Rounded.ContentCopy,
+                                contentDescription = "Copy folder path",
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = onBrowse,
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Storage,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Browse storage…")
+                    }
                     Text(
-                        text = "Tip: /storage/emulated/0/Download/Mmodel is easy to spot in any file manager.",
+                        text = "Opens the full storage on this phone. Tap folders to go deeper, then use the folder you land in.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -767,35 +866,19 @@ private fun ChangeFolderDialog(
             }
         },
         confirmButton = {
-            if (allFilesAccess) {
-                TextButton(
-                    onClick = {
-                        val error = vm.setDownloadRoot(folderPath)
-                        if (error == null) {
-                            onDismiss()
-                        } else {
-                            folderError = error
-                        }
-                    },
-                ) {
-                    Text("Use this folder")
-                }
+            TextButton(onClick = onDismiss) {
+                Text("Close")
             }
         },
         dismissButton = {
-            Row {
-                if (vm.isCustomDownloadRoot) {
-                    TextButton(
-                        onClick = {
-                            vm.resetDownloadRoot()
-                            onDismiss()
-                        },
-                    ) {
-                        Text("Reset to default")
-                    }
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel")
+            if (vm.isCustomDownloadRoot) {
+                TextButton(
+                    onClick = {
+                        vm.resetDownloadRoot()
+                        onDismiss()
+                    },
+                ) {
+                    Text("Reset to default")
                 }
             }
         },
