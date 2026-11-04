@@ -90,9 +90,7 @@ object ModelFiles {
 
     /** Why this file cannot be loaded into chat, or null when it can. */
     fun chatBlocker(format: ModelFormat, kind: ModelKind, fileCount: Int): String? {
-        val verdict = ModelInspector.inspectFromName("model", fileCount)
-            .let { it } // placeholder-free: derive verdict from format/kind directly below
-        val v = when {
+        val verdict = when {
             format != ModelFormat.GGUF -> CompatibilityVerdict.REFERENCE_ONLY
             kind == ModelKind.PROJECTOR -> CompatibilityVerdict.NEEDS_PAIR
             kind == ModelKind.TTS || kind == ModelKind.STT ||
@@ -101,9 +99,17 @@ object ModelFiles {
             fileCount > 1 -> CompatibilityVerdict.UNSUPPORTED_HERE
             else -> CompatibilityVerdict.CAN_RUN_TEXT_CHAT
         }
-        return if (v == CompatibilityVerdict.CAN_RUN_TEXT_CHAT) null
-        else ModelInspector.inspectFromName("", fileCount)
-            .copy(verdict = v, reason = null, format = format, kind = kind)
-            .userMessage()
+        if (verdict == CompatibilityVerdict.CAN_RUN_TEXT_CHAT) return null
+        // Build the inspection directly; inspectFromName calls back into
+        // chatBlocker and would recurse forever.
+        return ModelInspection(
+            format = format,
+            kind = kind,
+            architecture = null,
+            contextLength = null,
+            templateFamily = ChatTemplateFamily.DEFAULT,
+            verdict = verdict,
+            reason = null,
+        ).userMessage()
     }
 }
