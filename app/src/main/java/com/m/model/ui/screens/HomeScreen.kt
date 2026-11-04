@@ -462,17 +462,99 @@ private fun RecommendationCard(card: ModelCard, width: Dp, onClick: () -> Unit) 
     }
 }
 
+/**
+ * Responsive skeleton twin of [RecommendationCard]: the same horizontal rhythm
+ * (gradient strip, title block, badge, chips, RAM line) so the swap into real
+ * cards does not jolt the layout.
+ */
 @Composable
 private fun RecommendationLoading() {
-    Row(
-        modifier = Modifier.fillMaxWidth().height(188.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val count = when {
+            maxWidth > 900.dp -> 4
+            maxWidth > 600.dp -> 3
+            else -> 2
+        }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            userScrollEnabled = false,
+        ) {
+            items(count) {
+                RecommendationCardSkeleton(
+                    width = (maxWidth * 0.82f).coerceIn(268.dp, 396.dp),
+                )
+            }
+        }
+    }
+}
+
+/** A single shimmering card shaped like a recommendation card. */
+@Composable
+private fun RecommendationCardSkeleton(width: Dp) {
+    val padding = 16.dp
+    Surface(
+        modifier = Modifier.width(width).heightIn(min = 192.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        ),
+        tonalElevation = 2.dp,
     ) {
-        repeat(3) {
-            ShimmerBox(
-                modifier = Modifier.weight(1f).height(188.dp),
-                shape = MaterialTheme.shapes.extraLarge,
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
             )
+            Column(
+                modifier = Modifier.padding(padding),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ShimmerBox(
+                        modifier = Modifier.size(46.dp),
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ShimmerBox(modifier = Modifier.fillMaxWidth(0.7f).height(16.dp))
+                        ShimmerBox(modifier = Modifier.fillMaxWidth(0.42f).height(12.dp))
+                    }
+                    ShimmerBox(
+                        modifier = Modifier.width(84.dp).height(24.dp),
+                        shape = CircleShape,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    ShimmerBox(
+                        modifier = Modifier.width(96.dp).height(20.dp),
+                        shape = CircleShape,
+                    )
+                    ShimmerBox(
+                        modifier = Modifier.width(64.dp).height(20.dp),
+                        shape = CircleShape,
+                    )
+                    ShimmerBox(
+                        modifier = Modifier.width(52.dp).height(20.dp),
+                        shape = CircleShape,
+                    )
+                }
+                ShimmerBox(modifier = Modifier.fillMaxWidth(0.5f).height(12.dp))
+            }
         }
     }
 }
