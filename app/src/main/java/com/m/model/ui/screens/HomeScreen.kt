@@ -489,6 +489,7 @@ private fun RecommendationLoading() {
 }
 
 /** A single shimmering card shaped like a recommendation card. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecommendationCardSkeleton(width: Dp) {
     val padding = 16.dp
