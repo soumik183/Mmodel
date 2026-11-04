@@ -241,15 +241,9 @@ class LlamaEngine {
             }
         }.getOrNull() ?: return null
 
-        if (String(header, 0, 4, Charsets.US_ASCII) != "GGUF") {
-            return "This file is not a valid GGUF model."
-        }
-        val version = (header[4].toInt() and 0xFF) or
-            ((header[5].toInt() and 0xFF) shl 8) or
-            ((header[6].toInt() and 0xFF) shl 16) or
-            ((header[7].toInt() and 0xFF) shl 24)
-        if (version < 2) {
-            return "This GGUF is too old (version $version). Re-export it with a newer tool."
+        val parsed = parseGgufHeader(header) ?: return "This file is not a valid GGUF model."
+        if (parsed.version < 2) {
+            return "This GGUF is too old (version ${parsed.version}). Re-export it with a newer tool."
         }
         return null
     }

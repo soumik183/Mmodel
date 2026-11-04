@@ -89,22 +89,21 @@ object ModelFiles {
     }
 
     /** Why this file cannot be loaded into chat, or null when it can. */
-    fun chatBlocker(format: ModelFormat, kind: ModelKind, fileCount: Int): String? = when {
-        format != ModelFormat.GGUF ->
-            "Chat runs GGUF models only. This is a ${format.label} file — convert it with " +
-                "llama.cpp (convert_hf_to_gguf.py) to talk to it on this phone."
-        kind == ModelKind.PROJECTOR ->
-            "This is a vision projector (mmproj), not a chat model. Import the matching GGUF weights."
-        kind == ModelKind.TTS ->
-            "This is a text-to-speech voice model. Chat needs a text GGUF, not a TTS voice."
-        kind == ModelKind.STT ->
-            "This is a speech-to-text model. Chat needs a text GGUF, not an STT model."
-        kind == ModelKind.IMAGE ->
-            "This is an image-generation model. Chat needs a text GGUF."
-        kind == ModelKind.EMBEDDING ->
-            "This is an embedding model. Chat needs a generative text GGUF."
-        fileCount > 1 ->
-            "Chat needs a single-file GGUF. This download is split into $fileCount parts."
-        else -> null
+    fun chatBlocker(format: ModelFormat, kind: ModelKind, fileCount: Int): String? {
+        val verdict = ModelInspector.inspectFromName("model", fileCount)
+            .let { it } // placeholder-free: derive verdict from format/kind directly below
+        val v = when {
+            format != ModelFormat.GGUF -> CompatibilityVerdict.REFERENCE_ONLY
+            kind == ModelKind.PROJECTOR -> CompatibilityVerdict.NEEDS_PAIR
+            kind == ModelKind.TTS || kind == ModelKind.STT ||
+                kind == ModelKind.IMAGE || kind == ModelKind.EMBEDDING ->
+                CompatibilityVerdict.UNSUPPORTED_HERE
+            fileCount > 1 -> CompatibilityVerdict.UNSUPPORTED_HERE
+            else -> CompatibilityVerdict.CAN_RUN_TEXT_CHAT
+        }
+        return if (v == CompatibilityVerdict.CAN_RUN_TEXT_CHAT) null
+        else ModelInspector.inspectFromName("", fileCount)
+            .copy(verdict = v, reason = null, format = format, kind = kind)
+            .userMessage()
     }
 }
