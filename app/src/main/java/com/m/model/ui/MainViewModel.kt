@@ -29,6 +29,8 @@ import com.m.model.data.ModelFit
 import com.m.model.data.ModelFormat
 import com.m.model.data.ModelKind
 import com.m.model.data.ModelSort
+import com.m.model.data.PerformanceProfile
+import com.m.model.data.ModelInspector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -96,6 +98,8 @@ data class ChatState(
     val stopping: Boolean = false,
     val contextLength: Int = 0,
     val threads: Int = 0,
+    val profileLabel: String? = null,
+    val architecture: String? = null,
     val error: String? = null,
     val status: String? = null,
 )
@@ -106,9 +110,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val api = HfApi()
     private val cache = mutableMapOf<String, ModelCard>()
-    private var searchJob: Job? = null
-    private var loadMoreJob: Job? = null
-    private var detailJob: Job? = null
     private var detailFetchingId: String? = null
     private var browseEpoch = 0
     private var recommendationsJob: Job? = null
@@ -157,6 +158,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var chatInput by mutableStateOf("")
         private set
 
+    /**
+     * Performance profile chosen by the user (Speed / Battery-RAM / Adaptive),
+     * persisted in the chat preferences. Reloads the model if it is ready.
+     */
+    var performanceProfile by mutableStateOf(PerformanceProfile.ADAPTIVE)
+        private set
+
     private val engine = LlamaEngine()
     private val chatPreferences = application.getSharedPreferences("chat", 0)
     private val _chat = MutableStateFlow(ChatState())
@@ -169,6 +177,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var chatLoadEpoch = 0L
 
     init {
+        performanceProfile = runCatching {
+            PerformanceProfile.valueOf(
+                chatPreferences.getString(KEY_PROFILE, "ADAPTIVE") ?: "ADAPTIVE",
+            )
+        }.getOrDefault(PerformanceProfile.ADAPTIVE)
         loadRecommendations()
 
         val lastId = chatPreferences.getString(KEY_LAST_MODEL, null)
@@ -593,6 +606,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissChatError() {
         _chat.update { it.copy(error = null) }
+    }
+
+    fun setPerformanceProfile(profile: PerformanceProfile) {
+        performanceProfile = profile
+        chatPreferences.edit().putString(KEY_PROFILE, profile.name).apply()
+        val state = _chat.value
+        if (state.ready) loadChatModel()
+    }
+
+    fun continueLastAnswer() {
+        val state = _chat.value
+        if (!state.ready || state.generating || state.loadingModel) return
+        val record = downloadsStore.records.value.firstOrNull { it.id == state.recordId } ?: return
+        if (record.files.size > 1) {
+            _chat.update { it.copy(error = SPLIT_UNSUPPORTED) }
+            return
+        }
+        val lastAssistant = state.messages.lastOrNull { it.role == ChatRole.ASSISTANT } ?: return
+        val kept = state.messages
+            .takeWhile { it.id != lastAssistant.id } +
+            lastAssistant.copy(text = lastAssistant.text + " Continue: ", meta = null)
+        val newId = nextId()
+        _chat.update {
+            it.copy(
+                messages = kept + ChatMessage(
+                    id = newId,
+                    role = ChatRole.ASSISTANT,
+                    text = "",
+                    streaming = true,
+                ),
+                generating = true,
+                stopping = false,
+                error = null,
+                status = null,
+            )
+        }
+        runGeneration(record, newId)
+    }
+
+    fun undoLastExchange() {
+        val state = _chat.value
+        if (state.generating) return
+        val lastUserIndex = state.messages.indexOfLast { it.role == ChatRole.USER }
+        if (lastUserIndex < 0) return
+        _chat.update { it.copy(messages = it.messages.take(lastUserIndex)) }
     }
 
     fun importLocalModel(uri: Uri) {

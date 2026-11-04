@@ -35,6 +35,11 @@ object ChatPrompt {
         return withoutLeadingAssistant(kept.toList())
     }
 
+    fun trimForContext(turns: List<ChatTurn>, contextTokens: Int): List<ChatTurn> {
+        val budget = (contextTokens.coerceAtLeast(512) * 3).coerceIn(800, 12_000)
+        return trimHistory(turns, maxChars = budget)
+    }
+
     fun nativeMessages(
         system: String,
         turns: List<ChatTurn>,
@@ -47,23 +52,60 @@ object ChatPrompt {
         }
     }
 
+    fun samplingParams(profile: PerformanceProfile): Map<String, Any> = when (profile) {
+        PerformanceProfile.SPEED -> mapOf(
+            "temperature" to 0.7, "top_k" to 40, "top_p" to 0.95, "min_p" to 0.05,
+            "penalty_last_n" to 32, "penalty_repeat" to 1.1, "n_predict" to 512,
+        )
+        PerformanceProfile.BATTERY_RAM -> mapOf(
+            "temperature" to 0.7, "top_k" to 40, "top_p" to 0.95, "min_p" to 0.05,
+            "penalty_last_n" to 64, "penalty_repeat" to 1.1, "n_predict" to 256,
+        )
+        PerformanceProfile.ADAPTIVE -> mapOf(
+            "temperature" to 0.7, "top_k" to 40, "top_p" to 0.95, "min_p" to 0.05,
+            "penalty_last_n" to 48, "penalty_repeat" to 1.1, "n_predict" to 384,
+        )
+    }
+
     fun fallback(
         modelKey: String,
         system: String,
         turns: List<ChatTurn>,
     ): String {
         val key = modelKey.lowercase()
-        return when {
-            key.contains("gemma") -> gemma(system, turns)
-            key.contains("llama-3") || key.contains("llama_3") || key.contains("llama3") ->
-                llama3(system, turns)
-
-            key.contains("phi-3") || key.contains("phi3") -> phi3(system, turns)
+        val family = when {
+            key.contains("gemma") -> ChatTemplateFamily.GEMMA
+            key.contains("llama-3") || key.contains("llama_3") || key.contains("llama3") -> ChatTemplateFamily.LLAMA3
+            key.contains("phi-3") || key.contains("phi3") -> ChatTemplateFamily.PHI
             key.contains("mistral") || key.contains("mixtral") ||
-                key.contains("llama-2") || key.contains("llama2") -> mistral(system, turns)
-
-            else -> chatml(system, turns)
+                key.contains("llama-2") || key.contains("llama2") -> ChatTemplateFamily.MISTRAL
+            else -> ChatTemplateFamily.CHATML
         }
+        return fallbackForFamily(family, system, turns)
+    }
+
+    fun fallbackForFamily(
+        family: ChatTemplateFamily,
+        system: String,
+        turns: List<ChatTurn>,
+    ): String = when (family) {
+        ChatTemplateFamily.LLAMA3 -> llama3(system, turns)
+        ChatTemplateFamily.GEMMA -> gemma(system, turns)
+        ChatTemplateFamily.PHI -> phi3(system, turns)
+        ChatTemplateFamily.MISTRAL, ChatTemplateFamily.LLAMA2 -> mistral(system, turns)
+        ChatTemplateFamily.CHATML, ChatTemplateFamily.DEEPSEEK,
+        ChatTemplateFamily.FALCON, ChatTemplateFamily.CODE,
+        ChatTemplateFamily.DEFAULT -> chatml(system, turns)
+    }
+
+    fun cleanGeneration(text: String): String {
+        val stops = listOf("<|im_end|>", "<|end_of_turn|>", "<|eot_id|>", "</s>")
+        var cut = text
+        for (stop in stops) {
+            val idx = cut.indexOf(stop)
+            if (idx >= 0) cut = cut.substring(0, idx)
+        }
+        return cut.trim().replace(Regex("\n{3,}"), "\n\n")
     }
 
     private fun gemma(system: String, turns: List<ChatTurn>): String {

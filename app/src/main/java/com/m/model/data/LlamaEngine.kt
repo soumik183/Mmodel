@@ -24,6 +24,8 @@ class LlamaEngine {
         val contextLength: Int,
         val threads: Int,
         val modelDetails: Map<String, Any>,
+        val profileLabel: String? = null,
+        val architecture: String? = null,
     )
 
     data class GenerationResult(
@@ -57,7 +59,9 @@ class LlamaEngine {
     suspend fun load(
         file: File,
         contextLength: Int = 2_048,
-    ): Loaded = withContext(Dispatchers.IO) {
+    ): Loaded = load(file, ResolvedProfile(PerformanceProfile.ADAPTIVE, defaultThreads(), contextLength, 256, true, "Auto"))
+
+    suspend fun load(file: File, profile: ResolvedProfile): Loaded = withContext(Dispatchers.IO) {
         operation.withLock {
             unloadLocked()
 
@@ -71,7 +75,7 @@ class LlamaEngine {
                 file,
                 ParcelFileDescriptor.MODE_READ_ONLY,
             )
-            createSessionLocked(opened, file.absolutePath, contextLength)
+            createSessionLocked(opened, file.absolutePath, profile)
         }
     }
 
@@ -80,39 +84,49 @@ class LlamaEngine {
         descriptor: ParcelFileDescriptor,
         modelName: String,
         contextLength: Int = 2_048,
+    ): Loaded = load(
+        descriptor,
+        modelName,
+        ResolvedProfile(PerformanceProfile.ADAPTIVE, defaultThreads(), contextLength, 256, true, "Auto"),
+    )
+
+    suspend fun load(
+        descriptor: ParcelFileDescriptor,
+        modelName: String,
+        profile: ResolvedProfile,
     ): Loaded = withContext(Dispatchers.IO) {
         operation.withLock {
             unloadLocked()
-            createSessionLocked(descriptor, modelName, contextLength)
+            createSessionLocked(descriptor, modelName, profile)
         }
     }
 
     private suspend fun createSessionLocked(
         opened: ParcelFileDescriptor,
         label: String,
-        contextLength: Int,
+        profile: ResolvedProfile,
     ): Loaded {
         if (!isSupported) {
             runCatching { opened.close() }
             throw EngineFailure("Local chat needs a 64-bit ARM phone.")
         }
 
-        val threads = defaultThreads()
-        val chosenContextLength = contextLength.coerceIn(512, 4_096)
+        val threads = profile.threads.coerceAtLeast(1)
+        val chosenContextLength = profile.contextLength.coerceIn(512, 4_096)
         validateGgufHeader(opened)?.let { reason ->
             runCatching { opened.close() }
             throw EngineFailure(reason)
         }
         try {
             val context = LlamaContext(
-                Random.nextInt().absoluteValue,
+                System.nanoTime().absoluteValue,
                 mapOf(
                     "model" to label,
                     "model_fd" to opened.fd,
-                    "use_mmap" to false,
+                    "use_mmap" to profile.useMmap,
                     "use_mlock" to false,
                     "n_ctx" to chosenContextLength,
-                    "n_batch" to 256,
+                    "n_batch" to profile.batchSize,
                     "n_threads" to threads,
                 ),
             )
@@ -126,7 +140,10 @@ class LlamaEngine {
             synchronized(lock) {
                 session = Session(context, opened, label)
             }
-            return Loaded(chosenContextLength, threads, context.modelDetails)
+            val details = context.modelDetails
+            val arch = details["general.architecture"]?.toString()
+                ?: details["architecture"]?.toString()
+            return Loaded(chosenContextLength, threads, details, profile.label, arch)
         } catch (t: Throwable) {
             runCatching { opened.close() }
             if (t is CancellationException) throw t
@@ -137,6 +154,13 @@ class LlamaEngine {
     suspend fun generate(
         prompt: String,
         maxTokens: Int = 512,
+        onToken: (String) -> Unit,
+    ): GenerationResult = generate(prompt, maxTokens, PerformanceProfile.ADAPTIVE, onToken)
+
+    suspend fun generate(
+        prompt: String,
+        maxTokens: Int,
+        profile: PerformanceProfile,
         onToken: (String) -> Unit,
     ): GenerationResult = withContext(Dispatchers.IO) {
         val current = synchronized(lock) { session }
@@ -150,17 +174,18 @@ class LlamaEngine {
             }
             try {
                 val started = System.currentTimeMillis()
+                val sampling = ChatPrompt.samplingParams(profile)
                 current.context.completion(
                     mapOf(
                         "prompt" to prompt,
                         "emit_partial_completion" to true,
                         "n_predict" to maxTokens.coerceIn(1, 1_024),
-                        "temperature" to 0.7,
-                        "top_k" to 40,
-                        "top_p" to 0.95,
-                        "min_p" to 0.05,
-                        "penalty_last_n" to 64,
-                        "penalty_repeat" to 1.1,
+                        "temperature" to sampling["temperature"],
+                        "top_k" to sampling["top_k"],
+                        "top_p" to sampling["top_p"],
+                        "min_p" to sampling["min_p"],
+                        "penalty_last_n" to sampling["penalty_last_n"],
+                        "penalty_repeat" to sampling["penalty_repeat"],
                     ),
                 )
                 GenerationResult(tokens, System.currentTimeMillis() - started)

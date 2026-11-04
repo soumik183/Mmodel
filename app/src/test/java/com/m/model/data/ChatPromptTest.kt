@@ -13,6 +13,39 @@ class ChatPromptTest {
     )
 
     @Test
+    fun historyBudgetKeepsNewestWithinContext() {
+        val long = (1..10).map { ChatTurn("user", "x".repeat(500)) }
+        val trimmed = ChatPrompt.trimForContext(long, contextTokens = 2048)
+        assertTrue(trimmed.sumOf { it.content.length } <= 2048 * 3)
+        assertEquals("user", trimmed.first().role)
+    }
+
+    @Test
+    fun qwenFamilyUsesChatML() {
+        val prompt = ChatPrompt.fallbackForFamily(ChatTemplateFamily.CHATML, "sys", turns)
+        assertTrue(prompt.contains("<|im_start|>system"))
+    }
+
+    @Test
+    fun cleanGenerationTrimsStopArtifacts() {
+        assertEquals("Hello", ChatPrompt.cleanGeneration("Hello<|im_end|>\n<trash>"))
+    }
+
+    @Test
+    fun deepseekFamilyDoesNotUseGemmaMarkers() {
+        val prompt = ChatPrompt.fallbackForFamily(ChatTemplateFamily.DEEPSEEK, "sys", turns)
+        assertFalse(prompt.contains("<start_of_turn>"))
+    }
+
+    @Test
+    fun speedSamplingIsMoreGenerousThanBattery() {
+        val speed = ChatPrompt.samplingParams(PerformanceProfile.SPEED)
+        val battery = ChatPrompt.samplingParams(PerformanceProfile.BATTERY_RAM)
+        assertTrue((speed["n_predict"] as Int) >= (battery["n_predict"] as Int))
+        assertTrue((speed["penalty_last_n"] as Int) <= (battery["penalty_last_n"] as Int))
+    }
+
+    @Test
     fun chatmlIncludesSystemAndAssistantPrefix() {
         val prompt = ChatPrompt.fallback(
             "org/Qwen2.5-3B-Instruct-GGUF",
