@@ -167,7 +167,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Performance profile chosen by the user (Speed / Battery-RAM / Adaptive),
      * persisted in the chat preferences. Reloads the model if it is ready.
      */
-    var performanceProfile by mutableStateOf(PerformanceProfile.ADAPTIVE)
+    var currentPerformanceProfile by mutableStateOf(PerformanceProfile.ADAPTIVE)
         private set
 
     private val engine = LlamaEngine()
@@ -182,7 +182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var chatLoadEpoch = 0L
 
     init {
-        performanceProfile = runCatching {
+        currentPerformanceProfile = runCatching {
             PerformanceProfile.valueOf(
                 chatPreferences.getString(KEY_PROFILE, "ADAPTIVE") ?: "ADAPTIVE",
             )
@@ -614,7 +614,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setPerformanceProfile(profile: PerformanceProfile) {
-        performanceProfile = profile
+        currentPerformanceProfile = profile
         chatPreferences.edit().putString(KEY_PROFILE, profile.name).apply()
         val state = _chat.value
         if (state.ready) loadChatModel()
@@ -882,7 +882,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val profile = resolveProfile(
                 device,
-                performanceProfile,
+                currentPerformanceProfile,
                 record.contextLength,
             )
             val inspection = if (record.isImported) {
@@ -1038,7 +1038,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val result = engine.generate(
                     prompt,
                     maxTokens = (contextLength / 2).coerceIn(128, 512),
-                    profile = performanceProfile,
+                    profile = currentPerformanceProfile,
                 ) { token ->
                     if (generationId != generation) return@generate
                     _chat.update { current ->
